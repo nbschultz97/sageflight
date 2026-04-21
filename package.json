@@ -1,0 +1,28 @@
+{
+  "name": "stack-troubleshooter",
+  "version": "0.1.0",
+  "description": "FPV drone stack troubleshooting tool — motor tests, guided build assistance, offline LLM-driven diagnosis. Companion to stack-forensic.",
+  "main": "help.js",
+  "scripts": {
+    "help": "node help.js",
+    "spin": "node spin-test.js",
+    "spin-compare": "node spin-compare.js",
+    "spin-breakin": "node spin-breakin.js",
+    "ask": "node ask.js"
+  },
+  "keywords": [
+    "betaflight",
+    "flight-controller",
+    "esc",
+    "fpv",
+    "troubleshooting",
+    "ollama",
+    "local-llm"
+  ],
+  "author": "Noah Schultz",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "serialport": "^13.0.0"
+  }
+}
