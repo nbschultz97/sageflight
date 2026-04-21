@@ -34,19 +34,41 @@ No cloud, no Claude at runtime, no data exfil. Everything runs on your laptop.
 Mixing the two weakens the forensic tool's defensibility. They share protocol
 libraries but stay separate at the product level.
 
-## Install
+## Two ways to use the tool
+
+### 1. Web app (recommended — "AI Betaflight")
+
+A localhost web app with a real UI: detect, motors, LLM chat, config.
 
 ```bash
 git clone https://github.com/nbschultz97/stack-troubleshooter
+cd stack-troubleshooter/app
+npm install
+npm run dev
+# open http://localhost:5173
+```
+
+This is the primary interface. Powered by React + Tailwind in the browser with
+a Node/Express backend that wraps the protocol libraries. Future Electron wrap
+will turn this into a proper desktop app — same code.
+
+### 2. CLI scripts (standalone)
+
+The individual motor-test scripts and Ollama chat client also run standalone
+without the web app:
+
+```bash
 cd stack-troubleshooter
 npm install
+node spin-test.js 3 1070 2
+node ask.js "why might my quad fail arming after a BLHeli update?"
 ```
 
 For LLM features, install Ollama locally and pull a small model:
 
 ```bash
 # https://ollama.com/download
-ollama pull llama3.1:8b      # or qwen2.5:7b, or any instruction-tuned model
+ollama pull llama3.1:8b
 ```
 
 ## Commands

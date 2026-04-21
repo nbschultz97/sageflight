@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+
+@layer components {
+  .panel       { @apply bg-stack-panel border border-stack-border rounded-lg; }
+  .btn         { @apply px-4 py-2 rounded-md font-medium transition-colors; }
+  .btn-primary { @apply btn bg-stack-accent text-stack-bg hover:brightness-110; }
+  .btn-ghost   { @apply btn border border-stack-border text-stack-text hover:bg-stack-panel; }
+  .pill        { @apply inline-block px-2 py-0.5 text-xs rounded font-mono; }
+  .pill-ok     { @apply pill bg-stack-ok/15 text-stack-ok border border-stack-ok/30; }
+  .pill-warn   { @apply pill bg-stack-warn/15 text-stack-warn border border-stack-warn/30; }
+  .pill-err    { @apply pill bg-stack-err/15 text-stack-err border border-stack-err/30; }
+  .pill-muted  { @apply pill bg-stack-border text-stack-muted; }
+}
