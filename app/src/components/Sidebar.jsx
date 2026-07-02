@@ -5,7 +5,7 @@ export default function Sidebar({ tabs, active, onSelect }) {
     <aside className="w-56 shrink-0 bg-stack-panel border-r border-stack-border flex flex-col">
       <div className="p-4 border-b border-stack-border">
         <div className="font-mono text-lg font-bold text-stack-accent leading-none">STACK</div>
-        <div className="font-mono text-xs text-stack-muted mt-1">TROUBLESHOOTER v0.1</div>
+        <div className="font-mono text-xs text-stack-muted mt-1">TROUBLESHOOTER v0.2</div>
       </div>
       <nav className="flex-1 p-2 space-y-1">
         {tabs.map(t => (

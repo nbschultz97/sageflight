@@ -58,7 +58,7 @@ async function main() {
   const a = await ask('\n  Props OFF and quad restrained? Type "yes" to proceed: ');
   if (a !== 'yes' && a !== 'y') { console.log('  Aborted.'); return; }
 
-  const det = detectFC();
+  const det = await detectFC();
   if (det.type !== 'ALIVE') { console.log('  No FC on USB.'); process.exit(1); }
 
   const port = new SerialPort({ path: det.comPort, baudRate: 115200 });

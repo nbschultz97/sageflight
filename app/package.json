@@ -1,7 +1,7 @@
 {
   "name": "stack-troubleshooter-app",
-  "version": "0.1.0",
-  "description": "Localhost web app for drone stack troubleshooting — Detect, Motors, Chat, Config.",
+  "version": "0.2.0",
+  "description": "Localhost web app for drone stack troubleshooting — Detect, Motors, Config, Checklists, Chat.",
   "type": "module",
   "private": true,
   "scripts": {
@@ -13,7 +13,9 @@
   },
   "dependencies": {
     "cors": "^2.8.5",
+    "dompurify": "^3.4.11",
     "express": "^4.21.0",
+    "marked": "^18.0.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "serialport": "^13.0.0"

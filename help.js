@@ -4,6 +4,17 @@ printBanner();
 
 const sections = [
   {
+    title: 'WEB APP (primary interface)',
+    body: [
+      '  cd app && npm install && npm run dev    then open http://localhost:5173',
+      '',
+      '  Tabs: Detect (USB + FC scan), Motors (safety-gated spin tests with',
+      '  voltage-sag comparison + test history), Config (backups + CLI console),',
+      '  Checklists (guided build/preflight per airframe), Chat (offline LLM,',
+      '  optional read-only tool-calling agent mode).',
+    ],
+  },
+  {
     title: 'MOTOR TESTING (props must be off)',
     body: [
       '  node spin-test.js <motor 1-4> [pwm=1070] [seconds=2]',

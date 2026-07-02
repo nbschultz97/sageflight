@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import SafetyModal from './SafetyModal';
 
 export default function MotorsTab() {
@@ -9,6 +9,16 @@ export default function MotorsTab() {
   const [error, setError] = useState(null);
   const [selectedMotor, setSelectedMotor] = useState(1);
   const [pwm, setPwm] = useState(1070);
+  const [history, setHistory] = useState([]);
+
+  async function refreshHistory() {
+    try {
+      const j = await (await fetch('/api/history?limit=15')).json();
+      if (j.ok) setHistory(j.history);
+    } catch {}
+  }
+
+  useEffect(() => { refreshHistory(); }, [singleResult, compareResult]);
 
   function openSafety(action, onToken) {
     setError(null);
@@ -170,6 +180,40 @@ export default function MotorsTab() {
               {compareResult.verdict.outliers.length} motor(s) outside ±150mV of mean — investigate further (mechanical or winding).
             </div>
           )}
+        </section>
+      )}
+
+      {history.length > 0 && (
+        <section className="panel p-5">
+          <div className="text-xs uppercase tracking-wide text-stack-muted mb-3">Recent tests</div>
+          <table className="w-full text-sm">
+            <thead className="text-xs text-stack-muted uppercase">
+              <tr>
+                <th className="text-left pb-2 pr-4">When</th>
+                <th className="text-left pb-2 pr-4">Test</th>
+                <th className="text-left pb-2">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((h, i) => (
+                <tr key={i} className="border-t border-stack-border">
+                  <td className="py-2 pr-4 font-mono text-xs whitespace-nowrap">{h.at?.replace('T', ' ').slice(0, 19)}</td>
+                  <td className="py-2 pr-4">
+                    {h.kind === 'motor.spin' ? `Spin M${h.motor} @ ${h.pwm}` : `Compare @ ${h.pwm}`}
+                  </td>
+                  <td className="py-2 font-mono text-xs">
+                    {h.kind === 'motor.spin'
+                      ? (h.sag != null ? `sag ${h.sag}V` : '—')
+                      : (h.verdict
+                          ? (h.verdict.outliers?.length
+                              ? `outliers: ${h.verdict.outliers.map(o => `M${o.motor}`).join(', ')}`
+                              : `all normal · mean ${h.verdict.meanSag}V`)
+                          : '—')}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       )}
 
