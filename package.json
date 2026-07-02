@@ -1,10 +1,11 @@
 {
   "name": "stack-troubleshooter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "FPV drone stack troubleshooting tool — motor tests, guided build assistance, offline LLM-driven diagnosis. Companion to stack-forensic.",
   "main": "help.js",
   "scripts": {
     "help": "node help.js",
+    "test": "node --test \"test/*.test.js\"",
     "spin": "node spin-test.js",
     "spin-compare": "node spin-compare.js",
     "spin-breakin": "node spin-breakin.js",

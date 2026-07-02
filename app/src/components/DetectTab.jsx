@@ -27,6 +27,8 @@ export default function DetectTab() {
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || 'scan failed');
       setScan(j);
+      // Persist for the Chat tab's "FC context" toggle.
+      try { localStorage.setItem('st:lastScan', JSON.stringify({ at: new Date().toISOString(), fc: j.fc })); } catch {}
     } catch (e) {
       setError(e.message);
     } finally {
