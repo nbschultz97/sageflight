@@ -5,6 +5,7 @@ export default function DetectTab() {
   const [scan, setScan] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState(null);
+  const [forensicMatch, setForensicMatch] = useState(null); // { available, record }
 
   useEffect(() => {
     let cancelled = false;
@@ -29,6 +30,14 @@ export default function DetectTab() {
       setScan(j);
       // Persist for the Chat tab's "FC context" toggle.
       try { localStorage.setItem('st:lastScan', JSON.stringify({ at: new Date().toISOString(), fc: j.fc })); } catch {}
+      // Cross-reference the fc-forensic database by MCU id.
+      setForensicMatch(null);
+      if (j.fc?.mcuId && j.fc.mcuId !== 'UNKNOWN') {
+        try {
+          const fj = await (await fetch(`/api/forensic/unit/${encodeURIComponent(j.fc.mcuId)}`)).json();
+          if (fj.ok) setForensicMatch(fj);
+        } catch {}
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -41,8 +50,8 @@ export default function DetectTab() {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Detect</h1>
-        <p className="text-stack-muted mt-1">Plug in your flight controller via USB. Scan reads board identity, firmware, sensors, and health metrics via Betaflight CLI.</p>
+        <h1 className="text-2xl font-semibold">Setup</h1>
+        <p className="text-stack-muted mt-1">Plug in your flight controller via USB. Scan reads board identity, firmware, sensors, and health metrics via Betaflight CLI — and cross-references the fc-forensic case history for this exact board.</p>
       </div>
 
       <section className="panel p-5">
@@ -71,6 +80,8 @@ export default function DetectTab() {
         {scan?.fc && <FcReadout fc={scan.fc} />}
       </section>
 
+      {scan?.fc && forensicMatch && <ForensicPanel match={forensicMatch} />}
+
       {!isAlive && (
         <div className="panel p-4 text-sm text-stack-muted">
           <div className="font-semibold text-stack-text mb-1">Troubleshooting</div>
@@ -81,6 +92,59 @@ export default function DetectTab() {
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+function ForensicPanel({ match }) {
+  if (!match.available) return null;
+  const rec = match.record;
+  if (!rec) {
+    return (
+      <section className="panel p-4 text-sm text-stack-muted">
+        <span className="text-xs uppercase tracking-wide mr-2">Forensic history</span>
+        No fc-forensic record for this board — it has never been through a forensic scan.
+      </section>
+    );
+  }
+  const u = rec.unit;
+  return (
+    <section className="panel p-5">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="text-xs uppercase tracking-wide text-stack-muted">Forensic history match</div>
+        <span className={u.status === 'DEAD' ? 'pill-err' : u.status === 'HEALTHY' ? 'pill-ok' : 'pill-warn'}>
+          {u.status || 'UNKNOWN'}
+        </span>
+      </div>
+      <div className="grid md:grid-cols-2 gap-x-8 gap-y-1 text-sm">
+        <Info k="Unit" v={`#${u.unitNumber ?? '?'} · ${u.label || 'unlabeled'}`} />
+        <Info k="Batch" v={rec.batch} />
+        <Info k="Forensic scans" v={`${u.scanCount}${u.lastScanAt ? ` · last ${u.lastScanAt.slice(0, 10)}` : ''}`} />
+        {u.notes && <Info k="Notes" v={u.notes} />}
+      </div>
+      {rec.linkedEscs?.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-stack-border text-sm">
+          <div className="text-xs uppercase tracking-wide text-stack-muted mb-1">Linked ESC records</div>
+          {rec.linkedEscs.map((e, i) => (
+            <div key={i} className="text-stack-text">
+              {e.label || `ESC #${e.escId}`} — {e.manufacturer} {e.model}
+              {e.stackStatus && <span className="pill-muted ml-2">{e.stackStatus}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-3 text-xs text-stack-muted">
+        The AI Assistant can pull this record with its <span className="font-mono">get_forensic_record</span> tool.
+      </div>
+    </section>
+  );
+}
+
+function Info({ k, v }) {
+  return (
+    <div>
+      <span className="text-stack-muted text-xs uppercase tracking-wide mr-2">{k}</span>
+      <span>{v}</span>
     </div>
   );
 }

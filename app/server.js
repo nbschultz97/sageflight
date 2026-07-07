@@ -20,8 +20,12 @@ const { withCli, parseVoltage, classifyCliCommand } = require('../lib/fc-cli');
 const { createMutex } = require('../lib/serial-mutex');
 const store = require('../lib/store');
 const { TOOL_DEFINITIONS, createToolExecutor } = require('../lib/agent-tools');
+const forensic = require('../lib/forensic-db');
+const { interrogateAll } = require('../lib/esc-4way');
+const { parseIntelHex } = require('../lib/intel-hex');
+const { findDfuUtil, listDfuDevices, enterDfu, flashWithDfuUtil } = require('../lib/flash');
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 
 const app = express();
 app.use(cors());
@@ -98,7 +102,9 @@ app.post('/api/safety/confirm', (req, res) => {
   const { action, propsOff, batteryOn, restrained, acknowledged, backupTaken } = req.body || {};
   if (!action) return res.status(400).json({ ok: false, error: 'missing action' });
 
-  if (action.startsWith('motor.')) {
+  if (action.startsWith('motor.') || action === 'esc.interrogate') {
+    // ESC interrogation is read-only but powers the ESCs from battery and can
+    // twitch motors on reset — same physical posture as a motor test.
     if (!propsOff || !restrained) {
       return res.status(400).json({
         ok: false,
@@ -106,13 +112,13 @@ app.post('/api/safety/confirm', (req, res) => {
       });
     }
     if (!batteryOn) {
-      return res.status(400).json({ ok: false, error: 'Motor actuation requires batteryOn=true confirmation.' });
+      return res.status(400).json({ ok: false, error: 'This action requires batteryOn=true confirmation.' });
     }
-  } else if (action === 'config.write') {
+  } else if (action === 'config.write' || action === 'flash.write') {
     if (!acknowledged || !backupTaken) {
       return res.status(400).json({
         ok: false,
-        error: 'Config writes require acknowledged=true AND backupTaken=true (take a backup in the Config tab first).',
+        error: 'This action requires acknowledged=true AND backupTaken=true (take a backup in the Config tab first).',
       });
     }
   } else {
@@ -207,6 +213,40 @@ app.post('/api/motor/compare', async (req, res) => {
   }
 });
 
+// ---------- ESC interrogation (BLHeli 4-way, read-only) ----------
+app.post('/api/esc/interrogate', async (req, res) => {
+  const { token } = req.body || {};
+  if (!consumeToken(token, 'esc.interrogate')) {
+    return res.status(403).json({ ok: false, error: 'invalid or missing safety token' });
+  }
+  const det = await detectFC();
+  if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: `no FC on USB (${det.type})` });
+
+  try {
+    const result = await serial.runExclusive(() => interrogateAll(det.comPort));
+    store.appendHistory({ kind: 'esc.interrogate', ...result });
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ---------- stack-forensic DB (read-only context) ----------
+app.get('/api/forensic/status', (_req, res) => {
+  res.json({ ok: true, ...forensic.getStatus() });
+});
+
+app.get('/api/forensic/units', (_req, res) => {
+  res.json({ ok: true, units: forensic.listAllUnits() });
+});
+
+app.get('/api/forensic/unit/:mcuId', (req, res) => {
+  const status = forensic.getStatus();
+  if (!status.available) return res.json({ ok: true, available: false, record: null, hint: status.hint });
+  const record = forensic.findUnitByMcuId(req.params.mcuId);
+  res.json({ ok: true, available: true, record });
+});
+
 // ---------- Test history ----------
 app.get('/api/history', (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
@@ -279,6 +319,273 @@ app.post('/api/cli', async (req, res) => {
     res.json({ ok: true, command: line, kind: cls.kind, output: output.trim() });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Apply a batch of CLI commands in one session — the execution path for
+// AI-proposed config changes after the human clicks Apply. Every line is
+// re-validated here; one config.write token covers the batch.
+app.post('/api/cli/batch', async (req, res) => {
+  const { commands, token } = req.body || {};
+  const list = Array.isArray(commands) ? commands.map(c => String(c).trim()).filter(Boolean) : [];
+  if (list.length === 0) return res.status(400).json({ ok: false, error: 'commands must be a non-empty array' });
+  if (list.length > 50) return res.status(400).json({ ok: false, error: 'max 50 commands per batch' });
+
+  for (const line of list) {
+    if (line.length > 200 || /[\r\n]/.test(line)) {
+      return res.status(400).json({ ok: false, error: `invalid command line: ${line.slice(0, 50)}` });
+    }
+    const cls = classifyCliCommand(line);
+    if (cls.kind === 'forbidden' || cls.kind === 'unknown' || cls.kind === 'invalid') {
+      return res.status(403).json({ ok: false, error: `"${line}" is not allowed (${cls.kind})` });
+    }
+  }
+  if (!consumeToken(token, 'config.write')) {
+    return res.status(403).json({ ok: false, error: 'batch apply requires a config.write safety token' });
+  }
+
+  const det = await detectFC();
+  if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: `no FC on USB (${det.type})` });
+
+  const savesLast = list[list.length - 1]?.toLowerCase() === 'save';
+  try {
+    const results = await serial.runExclusive(() => withCli(det.comPort, async ({ send }) => {
+      const out = [];
+      for (const line of list) {
+        // `save` reboots the FC and drops the port — tolerate a dead write.
+        const output = await send(line, line.toLowerCase() === 'save' ? 1500 : 400).catch(() => '');
+        out.push({ command: line, output: String(output).trim() });
+      }
+      return out;
+    }));
+    store.appendHistory({ kind: 'config.batch', commands: list.length, saved: savesLast });
+    res.json({ ok: true, results, saved: savesLast });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ---------- Firmware flash (backup-first, dfu-util, verify-after) ----------
+const fsPromises = fs.promises;
+
+app.get('/api/flash/status', async (_req, res) => {
+  try {
+    const dfuUtil = findDfuUtil();
+    const detection = await detectFC();
+    const backups = store.listBackups();
+    res.json({
+      ok: true,
+      dfuUtil,
+      detection,
+      firmwares: store.listFirmwares(),
+      latestBackup: backups[0] || null,
+      dfuDevices: dfuUtil.found && detection.type === 'DFU' ? listDfuDevices(dfuUtil.path) : [],
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Body is the raw .hex text (content-type text/plain), name via query param.
+app.post('/api/flash/upload', express.text({ limit: '32mb', type: () => true }), (req, res) => {
+  const name = String(req.query.name || 'firmware.hex');
+  const text = typeof req.body === 'string' ? req.body : '';
+  if (!text.trim()) return res.status(400).json({ ok: false, error: 'empty upload' });
+  try {
+    const parsed = parseIntelHex(text);
+    const meta = {
+      baseAddress: parsed.baseAddressHex,
+      totalBytes: parsed.totalBytes,
+      dataBytes: parsed.dataBytes,
+    };
+    const { name: savedName } = store.saveFirmware(name, text, meta);
+    res.json({ ok: true, name: savedName, ...meta });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: `not a valid Intel HEX file: ${e.message}` });
+  }
+});
+
+// Betaflight releases (online, optional). Cached so repeat opens are instant;
+// fails soft when offline — the Flash tab falls back to local .hex upload.
+let releasesCache = { at: 0, data: null };
+app.get('/api/flash/releases', async (_req, res) => {
+  try {
+    if (!releasesCache.data || Date.now() - releasesCache.at > 10 * 60 * 1000) {
+      const r = await fetch('https://api.github.com/repos/betaflight/betaflight/releases?per_page=6', {
+        headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'sageflight' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!r.ok) throw new Error(`GitHub API: ${r.status}`);
+      const raw = await r.json();
+      releasesCache = {
+        at: Date.now(),
+        data: raw.filter(rel => !rel.draft).map(rel => ({
+          tag: rel.tag_name,
+          name: rel.name,
+          prerelease: rel.prerelease,
+          assets: (rel.assets || [])
+            .filter(a => a.name.endsWith('.hex'))
+            .map(a => ({ name: a.name, url: a.browser_download_url, sizeKb: Math.round(a.size / 1024) })),
+        })),
+      };
+    }
+    res.json({ ok: true, online: true, releases: releasesCache.data });
+  } catch (e) {
+    res.json({ ok: true, online: false, error: e.message, releases: [] });
+  }
+});
+
+// Download a release asset server-side and stage it. Locked to Betaflight's
+// GitHub releases so this can't be used to fetch arbitrary URLs.
+app.post('/api/flash/fetch', async (req, res) => {
+  const { url, name } = req.body || {};
+  if (!/^https:\/\/github\.com\/betaflight\/betaflight\/releases\/download\//.test(String(url))) {
+    return res.status(400).json({ ok: false, error: 'only official Betaflight release assets can be fetched' });
+  }
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(60000) });
+    if (!r.ok) throw new Error(`download failed: ${r.status}`);
+    const text = await r.text();
+    const parsed = parseIntelHex(text);
+    const meta = { baseAddress: parsed.baseAddressHex, totalBytes: parsed.totalBytes, dataBytes: parsed.dataBytes, source: url };
+    const { name: savedName } = store.saveFirmware(name || url.split('/').pop(), text, meta);
+    res.json({ ok: true, name: savedName, ...meta });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// The full guarded flash sequence, streamed as SSE stages.
+app.post('/api/flash/run', async (req, res) => {
+  const { token, firmware } = req.body || {};
+  sseHeaders(res);
+  const stage = (name, msg) => sseSend(res, { stage: name, msg });
+  const fail = (msg) => { sseSend(res, { error: msg }); res.end(); };
+
+  if (!consumeToken(token, 'flash.write')) return fail('invalid or missing safety token');
+
+  // 1. Preconditions: staged firmware + at least one config backup.
+  const hexText = store.readFirmware(firmware);
+  if (!hexText) return fail(`staged firmware "${firmware}" not found — upload it first`);
+  const backups = store.listBackups();
+  if (backups.length === 0) return fail('no config backup exists — take one in the Config tab before flashing');
+  stage('preflight', `Using backup ${backups[0].id} as the pre-flash config record.`);
+
+  const dfuUtil = findDfuUtil();
+  if (!dfuUtil.found) return fail('dfu-util not found on PATH — install it (see Flash tab instructions) and retry');
+  stage('preflight', `${dfuUtil.version}`);
+
+  let parsed;
+  try {
+    parsed = parseIntelHex(hexText);
+  } catch (e) {
+    return fail(`firmware file failed re-validation: ${e.message}`);
+  }
+  const binPath = store.firmwareBinPath(firmware);
+  await fsPromises.writeFile(binPath, parsed.image);
+  stage('preflight', `Image: ${(parsed.totalBytes / 1024).toFixed(0)} KB at ${parsed.baseAddressHex}`);
+
+  try {
+    // 2. Get the board into DFU.
+    let det = await detectFC();
+    if (det.type === 'ALIVE') {
+      stage('dfu', `Rebooting ${det.comPort} into DFU bootloader (CLI "bl")...`);
+      await serial.runExclusive(() => enterDfu(det.comPort));
+    } else if (det.type !== 'DFU') {
+      return fail(`FC must be ALIVE or already in DFU mode (currently: ${det.type})`);
+    }
+
+    const dfuDeadline = Date.now() + 30000;
+    let inDfu = det.type === 'DFU';
+    while (!inDfu && Date.now() < dfuDeadline) {
+      await new Promise(r => setTimeout(r, 1500));
+      det = await detectFC();
+      inDfu = det.type === 'DFU' || listDfuDevices(dfuUtil.path).length > 0;
+    }
+    if (!inDfu) return fail('FC did not enumerate in DFU mode within 30s. Unplug/replug while holding BOOT, then retry.');
+    stage('dfu', 'DFU bootloader detected.');
+
+    const devices = listDfuDevices(dfuUtil.path);
+    const uniqueIds = [...new Set(devices.map(d => `${d.vid}:${d.pid}`))];
+    if (uniqueIds.length > 1) {
+      return fail(`multiple DFU devices attached (${uniqueIds.join(', ')}) — unplug the others and retry`);
+    }
+
+    // 3. Flash.
+    stage('flash', 'Writing firmware — do NOT unplug...');
+    const { code } = await flashWithDfuUtil(dfuUtil.path, binPath, parsed.baseAddress,
+      line => sseSend(res, { stage: 'flash', msg: line }));
+    if (code !== 0) {
+      store.appendHistory({ kind: 'flash.run', firmware, ok: false, exitCode: code });
+      return fail(`dfu-util exited with code ${code} — firmware may not have been written. Check the log above.`);
+    }
+    stage('flash', 'dfu-util finished OK. FC should reboot into the new firmware.');
+
+    // 4. Verify: wait for the FC to come back, then scan it.
+    stage('verify', 'Waiting for FC to re-enumerate...');
+    const aliveDeadline = Date.now() + 60000;
+    let back = null;
+    while (Date.now() < aliveDeadline) {
+      await new Promise(r => setTimeout(r, 2000));
+      const d = await detectFC();
+      if (d.type === 'ALIVE') { back = d; break; }
+    }
+    if (!back) {
+      store.appendHistory({ kind: 'flash.run', firmware, ok: true, verified: false });
+      sseSend(res, { done: true, verified: false, warning: 'Flash completed but the FC has not re-enumerated within 60s. Unplug and replug USB, then Detect.' });
+      return res.end();
+    }
+
+    stage('verify', `FC back on ${back.comPort} — reading identity...`);
+    const fc = await serial.runExclusive(() => scanFC(back.comPort));
+    const { rawStatus, rawDiff, ...summary } = fc;
+    store.appendHistory({ kind: 'flash.run', firmware, ok: true, verified: true, boardName: fc.boardName, firmwareVersion: fc.firmware });
+    sseSend(res, { done: true, verified: true, fc: summary });
+    res.end();
+  } catch (e) {
+    store.appendHistory({ kind: 'flash.run', firmware, ok: false, error: e.message });
+    fail(e.message);
+  }
+});
+
+// Replay a saved config backup onto the FC line-by-line, then `save`.
+// This is the post-flash restore path. Requires a config.write token.
+app.post('/api/config/restore', async (req, res) => {
+  const { token, backupId } = req.body || {};
+  sseHeaders(res);
+  const fail = (msg) => { sseSend(res, { error: msg }); res.end(); };
+
+  if (!consumeToken(token, 'config.write')) return fail('invalid or missing config.write safety token');
+  const content = store.readBackup(backupId);
+  if (content == null) return fail(`backup "${backupId}" not found`);
+
+  const lines = content.split('\n')
+    .map(l => l.replace(/\r$/, ''))
+    .filter(l => l.trim() && !l.trim().startsWith('#'))
+    .filter(l => l.trim().toLowerCase() !== 'save'); // we issue save ourselves, once
+  if (lines.length === 0) return fail('backup contains no applicable lines');
+  if (lines.length > 2000) return fail('backup is implausibly large — refusing to replay');
+
+  const det = await detectFC();
+  if (det.type !== 'ALIVE') return fail(`no FC on USB (${det.type})`);
+
+  try {
+    await serial.runExclusive(() => withCli(det.comPort, async ({ send }) => {
+      sseSend(res, { stage: 'restore', msg: `Replaying ${lines.length} config lines from ${backupId}...` });
+      for (let i = 0; i < lines.length; i++) {
+        await send(lines[i], 120);
+        if ((i + 1) % 25 === 0 || i === lines.length - 1) {
+          sseSend(res, { stage: 'restore', msg: `${i + 1}/${lines.length} lines applied` });
+        }
+      }
+      sseSend(res, { stage: 'restore', msg: 'Saving — FC will reboot.' });
+      await send('save', 1500).catch(() => {}); // port drops as the FC reboots
+    }));
+    store.appendHistory({ kind: 'config.restore', backupId, lines: lines.length });
+    sseSend(res, { done: true, lines: lines.length });
+    res.end();
+  } catch (e) {
+    fail(e.message);
   }
 });
 
@@ -362,6 +669,7 @@ const execTool = createToolExecutor({
   withCli,
   runExclusive: serial.runExclusive,
   store,
+  forensic,
 });
 
 const MAX_AGENT_ROUNDS = 6;
@@ -372,9 +680,11 @@ app.post('/api/agent/chat', async (req, res) => {
 
   const convo = [
     { role: 'system', content: readSystemPrompt() +
-      '\n\nYou have live tools: detect_fc, scan_fc, get_config_diff, get_motor_history, list_config_backups.' +
+      '\n\nYou have live tools: detect_fc, scan_fc, get_config_diff, get_motor_history, list_config_backups,' +
+      ' get_forensic_record, list_forensic_units, get_last_esc_scan, propose_config_changes.' +
       ' Use them to look at the aircraft instead of asking the user for information a tool can fetch.' +
-      ' You can NOT spin motors or write config — direct the user to the Motors/Config tabs for that.' },
+      ' To change configuration, use propose_config_changes — the user reviews and approves the commands before they run.' +
+      ' You can NOT spin motors or flash firmware — direct the user to the Motors/Flash tabs for that.' },
     ...messages,
   ];
 

@@ -1,7 +1,7 @@
 {
-  "name": "stack-troubleshooter",
-  "version": "0.2.0",
-  "description": "FPV drone stack troubleshooting tool — motor tests, guided build assistance, offline LLM-driven diagnosis. Companion to stack-forensic.",
+  "name": "sageflight",
+  "version": "0.3.0",
+  "description": "Sageflight — AI-native FPV configurator & troubleshooter. Betaflight-style UI with an offline LLM copilot: detects, diagnoses, configures, and flashes your stack. Companion to fc-forensic.",
   "main": "help.js",
   "scripts": {
     "help": "node help.js",

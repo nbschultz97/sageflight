@@ -10,28 +10,62 @@ function renderMarkdown(text) {
 
 const STORAGE_KEY = 'st:chat:messages';
 
+// ---------- Model ranking ----------
+// Auto-pick the strongest tool-capable model the user has pulled. Family
+// weight prefers models with reliable tool-calling; size breaks ties.
+const FAMILY_WEIGHT = [
+  [/^qwen3/, 50], [/^qwen2\.5/, 45], [/^llama3\.3/, 42], [/^llama3\.1/, 35],
+  [/^mistral-nemo/, 30], [/^mistral/, 25], [/^command-r/, 25], [/^hermes3/, 22],
+  [/^llama3(?![.\d])/, 10], [/^gemma/, 5], [/^phi/, 5],
+];
+
+function scoreModel(name) {
+  const n = name.toLowerCase();
+  let family = 0;
+  for (const [re, w] of FAMILY_WEIGHT) { if (re.test(n)) { family = w; break; } }
+  const size = parseFloat(n.match(/(\d+(?:\.\d+)?)b/)?.[1] || '0');
+  return family * 1000 + size;
+}
+
+function bestModel(models) {
+  if (!models?.length) return null;
+  return [...models].sort((a, b) => scoreModel(b) - scoreModel(a))[0];
+}
+
 export default function ChatTab() {
   const [ollama, setOllama] = useState(null);
-  const [model, setModel] = useState(() => localStorage.getItem('st:chat:model') || 'llama3.1:8b');
+  const [model, setModel] = useState(() => localStorage.getItem('st:chat:model') || '');
   const [messages, setMessages] = useState(() => {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; }
-  }); // { role, content, tools?: [{name, ok}] }
+  }); // { role, content, tools?: [{name, ok}], proposal?: {commands, reason, status, results?} }
   const [draft, setDraft] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState(null);
-  const [agentMode, setAgentMode] = useState(() => localStorage.getItem('st:chat:agent') === '1');
+  const [agentMode, setAgentMode] = useState(() => localStorage.getItem('st:chat:agent') !== '0');
   const [includeContext, setIncludeContext] = useState(true);
+  const [applyConfirm, setApplyConfirm] = useState(null); // message index pending apply
   const scrollRef = useRef(null);
 
   useEffect(() => {
-    fetch('/api/ollama/health').then(r => r.json()).then(setOllama).catch(() => setOllama({ ok: false }));
+    fetch('/api/ollama/health').then(r => r.json()).then(j => {
+      setOllama(j);
+      // Auto-select the strongest available model unless the user's saved
+      // pick is still installed.
+      if (j?.ok && j.models?.length) {
+        const saved = localStorage.getItem('st:chat:model');
+        if (!saved || !j.models.includes(saved)) {
+          const best = bestModel(j.models);
+          if (best) setModel(best);
+        }
+      }
+    }).catch(() => setOllama({ ok: false }));
   }, []);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(messages.slice(-60)));
   }, [messages]);
 
-  useEffect(() => { localStorage.setItem('st:chat:model', model); }, [model]);
+  useEffect(() => { if (model) localStorage.setItem('st:chat:model', model); }, [model]);
   useEffect(() => { localStorage.setItem('st:chat:agent', agentMode ? '1' : '0'); }, [agentMode]);
 
   useEffect(() => {
@@ -95,7 +129,16 @@ export default function ChatTab() {
             setMessages(m => {
               const copy = [...m];
               const last = copy[copy.length - 1];
-              copy[copy.length - 1] = { ...last, tools: [...(last.tools || []), { name: obj.tool_call.name, pending: true }] };
+              const update = { ...last, tools: [...(last.tools || []), { name: obj.tool_call.name, pending: true }] };
+              // A config proposal becomes a reviewable Apply card on this message.
+              if (obj.tool_call.name === 'propose_config_changes' && obj.tool_call.args?.commands) {
+                update.proposal = {
+                  commands: (obj.tool_call.args.commands || []).map(String),
+                  reason: String(obj.tool_call.args.reason || ''),
+                  status: 'pending',
+                };
+              }
+              copy[copy.length - 1] = update;
               return copy;
             });
           }
@@ -106,7 +149,11 @@ export default function ChatTab() {
               const tools = [...(last.tools || [])];
               const idx = tools.findIndex(t => t.name === obj.tool_result.name && t.pending);
               if (idx >= 0) tools[idx] = { name: obj.tool_result.name, ok: obj.tool_result.ok, error: obj.tool_result.error };
-              copy[copy.length - 1] = { ...last, tools };
+              const update = { ...last, tools };
+              if (obj.tool_result.name === 'propose_config_changes' && !obj.tool_result.ok && last.proposal) {
+                update.proposal = { ...last.proposal, status: 'invalid', error: obj.tool_result.error };
+              }
+              copy[copy.length - 1] = update;
               return copy;
             });
           }
@@ -127,6 +174,34 @@ export default function ChatTab() {
     }
   }
 
+  async function applyProposal(msgIndex) {
+    setApplyConfirm(null);
+    const proposal = messages[msgIndex]?.proposal;
+    if (!proposal) return;
+    const patch = (p) => setMessages(m => m.map((msg, i) => i === msgIndex ? { ...msg, proposal: { ...msg.proposal, ...p } } : msg));
+    patch({ status: 'applying' });
+    try {
+      const tr = await fetch('/api/safety/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'config.write', acknowledged: true, backupTaken: true }),
+      });
+      const tj = await tr.json();
+      if (!tj.ok) throw new Error(tj.error || 'token refused');
+
+      const r = await fetch('/api/cli/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: tj.token, commands: proposal.commands }),
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || 'apply failed');
+      patch({ status: 'applied', results: j.results, saved: j.saved });
+    } catch (e) {
+      patch({ status: 'failed', error: e.message });
+    }
+  }
+
   function clearChat() {
     setMessages([]);
     localStorage.removeItem(STORAGE_KEY);
@@ -137,29 +212,41 @@ export default function ChatTab() {
     try { return !!JSON.parse(localStorage.getItem('st:lastScan'))?.fc; } catch { return false; }
   })();
 
+  const hasBackup = useHasBackup();
+  const smallModel = ollama?.ok && model &&
+    parseFloat(model.toLowerCase().match(/(\d+(?:\.\d+)?)b/)?.[1] || '0') < 14;
+
   return (
     <div className="max-w-4xl h-full flex flex-col gap-4">
       <div className="flex items-baseline justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Chat</h1>
-          <p className="text-stack-muted text-sm mt-1">Offline LLM via Ollama. No cloud, no data exfil.</p>
+          <h1 className="text-2xl font-semibold">AI Assistant</h1>
+          <p className="text-stack-muted text-sm mt-1">Offline LLM via Ollama. No cloud, no data exfil. It inspects your aircraft with tools and proposes fixes you approve.</p>
         </div>
         <OllamaStatus ollama={ollama} model={model} setModel={setModel} />
       </div>
+
+      {smallModel && (
+        <div className="note text-xs">
+          <span className="font-semibold">Tip:</span> <span className="font-mono">{model}</span> works, but a larger
+          model gives noticeably better diagnosis and proposals. If your machine can run it:{' '}
+          <span className="font-mono">ollama pull qwen2.5:32b</span> (or <span className="font-mono">qwen2.5:14b</span>) — Sageflight will auto-select it.
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-4 text-sm">
         <Toggle
           checked={agentMode}
           onChange={setAgentMode}
           label="Tools"
-          hint="Let the LLM run read-only tools: detect, scan, read config, test history. It can never spin motors."
+          hint="Let the LLM inspect the aircraft (detect, scan, config, history, forensic DB) and propose config changes you approve. It can never actuate hardware itself."
         />
         <Toggle
           checked={includeContext && hasScan}
           disabled={!hasScan}
           onChange={setIncludeContext}
           label="FC context"
-          hint={hasScan ? 'Include your last FC scan in the conversation' : 'Run a scan in the Detect tab first'}
+          hint={hasScan ? 'Include your last FC scan in the conversation' : 'Run a scan in the Setup tab first'}
         />
         {messages.length > 0 && (
           <button onClick={clearChat} className="text-stack-muted hover:text-stack-err ml-auto">clear chat</button>
@@ -173,15 +260,16 @@ export default function ChatTab() {
             <ul className="list-disc pl-5 mt-2 space-y-1">
               <li>"my quad won't arm, what do I check?"</li>
               <li>"scan my FC and tell me if anything looks wrong" <span className="pill-muted ml-1">Tools on</span></li>
-              <li>"one motor is grinding, how do I diagnose it?"</li>
+              <li>"set me up for DSHOT600 with bidirectional dshot" <span className="pill-muted ml-1">proposes changes</span></li>
+              <li>"what's the forensic history on this board?"</li>
             </ul>
           </div>
         )}
         {messages.map((m, i) => (
           <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
             <div className={[
-              'max-w-[85%] rounded-lg px-4 py-2.5',
-              m.role === 'user' ? 'bg-stack-accent/15 border border-stack-accent/30' : 'bg-stack-border/50 border border-stack-border',
+              'max-w-[85%] rounded px-4 py-2.5',
+              m.role === 'user' ? 'bg-stack-accent/15 border border-stack-accent/30' : 'bg-stack-bg border border-stack-border',
             ].join(' ')}>
               <div className="text-xs uppercase tracking-wide text-stack-muted mb-1">
                 {m.role === 'user' ? 'you' : model}
@@ -199,6 +287,13 @@ export default function ChatTab() {
               {m.role === 'user'
                 ? <div className="text-sm whitespace-pre-wrap">{m.content}</div>
                 : <div className="text-sm chat-markdown" dangerouslySetInnerHTML={renderMarkdown(m.content)} />}
+              {m.proposal && (
+                <ProposalCard
+                  proposal={m.proposal}
+                  hasBackup={hasBackup}
+                  onApply={() => setApplyConfirm(i)}
+                />
+              )}
               {streaming && i === messages.length - 1 && m.role === 'assistant' && !m.content && (
                 <div className="text-stack-muted text-sm">{m.tools?.some(t => t.pending) ? 'running tools…' : 'thinking…'}</div>
               )}
@@ -213,15 +308,87 @@ export default function ChatTab() {
         <input
           value={draft}
           onChange={e => setDraft(e.target.value)}
-          placeholder={ollama?.ok ? (agentMode ? 'Ask — the LLM can inspect your FC…' : 'Ask about your build…') : 'Ollama not reachable — check status above'}
+          placeholder={ollama?.ok ? (agentMode ? 'Ask — the AI can inspect your FC and propose fixes…' : 'Ask about your build…') : 'Ollama not reachable — check status above'}
           disabled={!ollama?.ok || streaming}
-          className="flex-1 bg-stack-panel border border-stack-border rounded-md px-4 py-2.5 font-sans outline-none focus:border-stack-accent disabled:opacity-50"
+          className="flex-1 bg-stack-panel border border-stack-border rounded px-4 py-2.5 font-sans outline-none focus:border-stack-accent disabled:opacity-50"
         />
         <button type="submit" disabled={!ollama?.ok || streaming || !draft.trim()}
           className={(ollama?.ok && !streaming && draft.trim()) ? 'btn-primary' : 'btn-ghost opacity-50'}>
           {streaming ? 'Streaming…' : 'Send'}
         </button>
       </form>
+
+      {applyConfirm != null && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="panel p-6 max-w-lg w-full">
+            <h2 className="text-xl font-semibold text-stack-warn">⚠ Apply AI-proposed config</h2>
+            <p className="text-sm text-stack-muted mt-2">
+              These commands will be written to the flight controller. Review them in the card —
+              a wrong value can make the aircraft unflyable or unsafe.
+            </p>
+            {!hasBackup && (
+              <p className="text-sm text-stack-err mt-3">No config backup exists yet — take one in the Config tab first.</p>
+            )}
+            <div className="mt-6 flex gap-3 justify-end">
+              <button className="btn-ghost" onClick={() => setApplyConfirm(null)}>Cancel</button>
+              <button
+                className={hasBackup ? 'btn-primary' : 'btn-ghost opacity-50 cursor-not-allowed'}
+                disabled={!hasBackup}
+                onClick={() => applyProposal(applyConfirm)}
+              >I have a backup — apply it</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function useHasBackup() {
+  const [has, setHas] = useState(false);
+  useEffect(() => {
+    fetch('/api/config/backups').then(r => r.json())
+      .then(j => setHas(!!(j.ok && j.backups?.length)))
+      .catch(() => {});
+  }, []);
+  return has;
+}
+
+function ProposalCard({ proposal, hasBackup, onApply }) {
+  const border =
+    proposal.status === 'applied' ? 'border-stack-ok/60' :
+    proposal.status === 'failed' || proposal.status === 'invalid' ? 'border-stack-err/60' :
+    'border-stack-accent/60';
+  return (
+    <div className={`mt-3 border ${border} rounded bg-stack-panel`}>
+      <div className="px-3 py-2 border-b border-stack-border flex items-center justify-between">
+        <div className="text-xs uppercase tracking-wide text-stack-accent font-semibold">Proposed config change</div>
+        {proposal.status === 'pending' && <span className="pill-warn">awaiting your approval</span>}
+        {proposal.status === 'applying' && <span className="pill-muted">applying…</span>}
+        {proposal.status === 'applied' && <span className="pill-ok">applied{proposal.saved ? ' + saved' : ''}</span>}
+        {proposal.status === 'failed' && <span className="pill-err">failed</span>}
+        {proposal.status === 'invalid' && <span className="pill-err">rejected</span>}
+      </div>
+      {proposal.reason && <div className="px-3 py-2 text-sm text-stack-muted">{proposal.reason}</div>}
+      <pre className="px-3 py-2 text-xs font-mono whitespace-pre-wrap text-stack-text">
+        {proposal.commands.join('\n')}
+      </pre>
+      {proposal.error && <div className="px-3 py-2 text-xs text-stack-err">{proposal.error}</div>}
+      {proposal.status === 'pending' && (
+        <div className="px-3 py-2 border-t border-stack-border flex justify-end">
+          <button className="btn-primary text-sm py-1.5" onClick={onApply}>
+            Review &amp; apply…
+          </button>
+        </div>
+      )}
+      {proposal.status === 'applied' && proposal.results?.some(r => r.output) && (
+        <details className="px-3 py-2 border-t border-stack-border text-xs">
+          <summary className="cursor-pointer text-stack-muted">FC output</summary>
+          <pre className="mt-1 font-mono whitespace-pre-wrap text-stack-muted">
+            {proposal.results.map(r => `# ${r.command}\n${r.output}`).join('\n')}
+          </pre>
+        </details>
+      )}
     </div>
   );
 }
@@ -253,7 +420,7 @@ function OllamaStatus({ ollama, model, setModel }) {
         className="ml-2 bg-stack-panel border border-stack-border rounded px-2 py-1 text-xs font-mono">
         {ollama.models?.length > 0
           ? ollama.models.map(m => <option key={m} value={m}>{m}</option>)
-          : <option value={model}>{model}</option>}
+          : <option value={model}>{model || 'no models pulled'}</option>}
       </select>
     </div>
   );

@@ -1,7 +1,7 @@
 {
-  "name": "stack-troubleshooter-app",
-  "version": "0.2.0",
-  "description": "Localhost web app for drone stack troubleshooting — Detect, Motors, Config, Checklists, Chat.",
+  "name": "sageflight-app",
+  "version": "0.3.0",
+  "description": "Sageflight web app — Betaflight-style AI configurator: Setup, Motors, ESC, Config, Checklists, AI Assistant, Firmware Flasher.",
   "type": "module",
   "private": true,
   "scripts": {
