@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTelemetry } from '../telemetry';
 
 export default function DetectTab() {
   const [detection, setDetection] = useState(null);
@@ -51,8 +52,10 @@ export default function DetectTab() {
     <div className="max-w-4xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Setup</h1>
-        <p className="text-stack-muted mt-1">Plug in your flight controller via USB. Scan reads board identity, firmware, sensors, and health metrics via Betaflight CLI — and cross-references the fc-forensic case history for this exact board.</p>
+        <p className="text-stack-muted mt-1">Plug in your flight controller and hit <span className="text-stack-accent font-semibold">Connect</span> for live telemetry. Scan reads board identity, firmware, sensors, and health via Betaflight CLI — and cross-references the fc-forensic case history for this exact board.</p>
       </div>
+
+      <LivePanel />
 
       <section className="panel p-5">
         <div className="flex items-center justify-between mb-4">
@@ -92,6 +95,110 @@ export default function DetectTab() {
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+// Live attitude + vitals while connected — the "is it alive" view.
+function LivePanel() {
+  const { connected, telemetry } = useTelemetry();
+  if (!connected || !telemetry) return null;
+  const att = telemetry.attitude;
+  const an = telemetry.analog;
+  const st = telemetry.status;
+
+  return (
+    <section className="panel p-5">
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-xs uppercase tracking-wide text-stack-muted">Live</div>
+        {st?.armed
+          ? <span className="pill-err">ARMED</span>
+          : <span className="pill-ok">disarmed</span>}
+      </div>
+      <div className="flex flex-wrap items-center gap-8">
+        <Horizon roll={att?.roll ?? 0} pitch={att?.pitch ?? 0} />
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-x-10 gap-y-4">
+          <Tile label="Roll" value={att ? `${att.roll.toFixed(1)}°` : '—'} />
+          <Tile label="Pitch" value={att ? `${att.pitch.toFixed(1)}°` : '—'} />
+          <Tile label="Heading" value={att ? `${att.yaw}°` : '—'} />
+          <Tile label="Battery" value={an ? `${an.voltage.toFixed(2)}V` : '—'}
+            warn={an && an.voltage > 6 && an.voltage / Math.max(1, Math.round(an.voltage / 3.9)) < 3.5} />
+          <Tile label="Current" value={an ? `${an.amperage.toFixed(2)}A` : '—'} />
+          <Tile label="RSSI" value={an ? `${an.rssi}%` : '—'} />
+          <Tile label="Cycle time" value={st ? `${st.cycleTime}µs` : '—'} />
+          <Tile label="I2C errors" value={st ? String(st.i2cErrors) : '—'} warn={st?.i2cErrors > 0} />
+          <Tile label="mAh drawn" value={an ? String(an.mahDrawn) : '—'} />
+        </div>
+      </div>
+
+      <ArmingDoctor status={st} />
+    </section>
+  );
+}
+
+// The #1 beginner question, answered live: every active arming-disable flag
+// with a plain-English fix. (BF Configurator shows the flag names; we say
+// what to actually do.)
+function ArmingDoctor({ status }) {
+  const flags = status?.armingDisable || [];
+  if (status?.armed || flags.length === 0) return null;
+  // MSP is always set while we're connected over USB — call it out gently
+  // instead of alarming the user.
+  const mspOnly = flags.length === 1 && flags[0].name === 'MSP';
+  return (
+    <div className="mt-5 pt-4 border-t border-stack-border">
+      <div className="text-xs uppercase tracking-wide text-stack-muted mb-2">
+        Why won't it arm? · {flags.length} active blocker{flags.length > 1 ? 's' : ''}
+      </div>
+      {mspOnly ? (
+        <div className="text-sm text-stack-muted">
+          Only <span className="font-mono text-stack-text">MSP</span> — normal while connected over USB.
+          Unplug USB and it will arm (given props-off bench safety, of course).
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {flags.map(f => (
+            <div key={f.bit} className="flex gap-3 text-sm">
+              <span className={f.name === 'MSP' ? 'pill-muted shrink-0' : 'pill-warn shrink-0'}>{f.name}</span>
+              <div>
+                <span className="text-stack-text">{f.meaning}.</span>{' '}
+                <span className="text-stack-muted">{f.fix}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// CSS artificial horizon: sky/ground split rotated by roll, shifted by pitch.
+function Horizon({ roll, pitch }) {
+  const pitchShift = Math.max(-40, Math.min(40, pitch)) * 1.1;
+  return (
+    <div className="w-36 h-36 rounded-full border-2 border-stack-border overflow-hidden relative shrink-0 bg-stack-bg">
+      <div
+        className="absolute inset-[-40%]"
+        style={{ transform: `rotate(${-roll}deg) translateY(${pitchShift}px)`, transition: 'transform 100ms linear' }}
+      >
+        <div className="absolute inset-x-0 top-0 h-1/2 bg-sky-800" />
+        <div className="absolute inset-x-0 bottom-0 h-1/2 bg-amber-900" />
+        <div className="absolute inset-x-0 top-1/2 h-px bg-white/80" />
+      </div>
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-1">
+        <div className="w-5 h-px bg-stack-accent" />
+        <div className="w-1.5 h-1.5 rounded-full border border-stack-accent" />
+        <div className="w-5 h-px bg-stack-accent" />
+      </div>
+    </div>
+  );
+}
+
+function Tile({ label, value, warn }) {
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wide text-stack-muted">{label}</div>
+      <div className={`mt-0.5 text-lg font-mono ${warn ? 'text-stack-warn' : 'text-stack-text'}`}>{value}</div>
     </div>
   );
 }

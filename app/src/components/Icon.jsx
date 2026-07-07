@@ -46,6 +46,22 @@ const PATHS = {
       <path d="M8.5 10.5h.01M12 10.5h.01M15.5 10.5h.01" />
     </>
   ),
+  // receiver / radio
+  receiver: (
+    <>
+      <path d="M12 12l-6 9M12 12l6 9M12 12V5" />
+      <path d="M8 5a6 6 0 018 0M6 3a9 9 0 0112 0" />
+      <circle cx="12" cy="12" r="1.2" />
+    </>
+  ),
+  // blackbox / flight recorder
+  blackbox: (
+    <>
+      <rect x="4" y="8" width="16" height="12" rx="1.5" />
+      <path d="M4 12h16M8 8V5a4 4 0 018 0v3" />
+      <path d="M7 16h2M11 16h2M15 16h2" />
+    </>
+  ),
   // firmware flash
   flash: (
     <>

@@ -329,19 +329,27 @@ export default function FlashTab() {
       </section>
 
       {/* 5 · Restore */}
-      <section className="panel p-5">
-        <div className="text-xs uppercase tracking-wide text-stack-muted mb-3">5 · Restore config (after flash)</div>
+      <section className="panel p-5 space-y-4">
+        <div className="text-xs uppercase tracking-wide text-stack-muted">5 · Restore config (after flash)</div>
         {!hasBackup && <div className="text-sm text-stack-muted">No backups to restore.</div>}
         {hasBackup && (
-          <div className="flex items-center justify-between text-sm">
-            <div>
-              Replay <span className="font-mono text-xs">{status.latestBackup.id}</span> onto the FC and save.
+          <>
+            <div className="flex items-center justify-between text-sm">
+              <div>
+                <span className="text-stack-text">Same firmware version?</span>{' '}
+                <span className="text-stack-muted">Replay <span className="font-mono text-xs">{status.latestBackup.id}</span> verbatim.</span>
+              </div>
+              <button className="btn-ghost text-sm" disabled={busy || det?.type !== 'ALIVE'}
+                onClick={() => setRestore(status.latestBackup.id)}>
+                {restoring ? 'Restoring…' : 'Restore latest backup'}
+              </button>
             </div>
-            <button className="btn-ghost text-sm" disabled={busy || det?.type !== 'ALIVE'}
-              onClick={() => setRestore(status.latestBackup.id)}>
-              {restoring ? 'Restoring…' : 'Restore latest backup'}
-            </button>
-          </div>
+            <MigrationAssistant
+              backupId={status.latestBackup.id}
+              busy={busy}
+              detAlive={det?.type === 'ALIVE'}
+            />
+          </>
         )}
       </section>
 
@@ -363,6 +371,122 @@ export default function FlashTab() {
           confirmLabel="Restore and save"
           onCancel={() => setRestore(null)}
           onConfirm={() => runRestore(restore)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Upgraded firmware versions? Blind diff replay silently drops renamed
+// parameters (classic: filter settings → burned motors). The AI translates
+// the old diff for the new version; you review every line before applying.
+function MigrationAssistant({ backupId, busy, detAlive }) {
+  const [result, setResult] = useState(null); // { commands, notes, rejected, ... }
+  const [lines, setLines] = useState('');
+  const [running, setRunning] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const [error, setError] = useState(null);
+  const [done, setDone] = useState(false);
+  const model = localStorage.getItem('st:chat:model') || 'llama3.1:8b';
+
+  async function migrate() {
+    setRunning(true); setError(null); setResult(null); setDone(false);
+    try {
+      let targetVersion = 'unknown';
+      try { targetVersion = JSON.parse(localStorage.getItem('st:lastScan'))?.fc?.firmware || 'unknown'; } catch {}
+      const r = await fetch('/api/config/migrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backupId, model, targetVersion }),
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || 'migration failed');
+      setResult(j);
+      setLines(j.commands.join('\n'));
+    } catch (e) { setError(e.message); }
+    finally { setRunning(false); }
+  }
+
+  async function apply() {
+    setConfirm(false); setApplying(true); setError(null);
+    try {
+      const commands = lines.split('\n').map(l => l.trim()).filter(Boolean);
+      const tr = await fetch('/api/safety/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'config.write', acknowledged: true, backupTaken: true }),
+      });
+      const tj = await tr.json();
+      if (!tj.ok) throw new Error(tj.error || 'token refused');
+      const r = await fetch('/api/cli/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: tj.token, commands }),
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || 'apply failed');
+      setDone(true);
+    } catch (e) { setError(e.message); }
+    finally { setApplying(false); }
+  }
+
+  return (
+    <div className="border-t border-stack-border pt-4">
+      <div className="flex items-center justify-between text-sm">
+        <div>
+          <span className="text-stack-text">Different firmware version?</span>{' '}
+          <span className="text-stack-muted">Let the AI translate the old diff — renamed parameters fixed, dead ones dropped, every line reviewable.</span>
+        </div>
+        <button className="btn-ghost text-sm shrink-0 ml-3" disabled={busy || running} onClick={migrate}>
+          {running ? 'Translating…' : 'AI migration review'}
+        </button>
+      </div>
+
+      {error && <div className="mt-3 text-sm text-stack-err">{error}</div>}
+
+      {result && (
+        <div className="mt-3 space-y-3">
+          <div className="text-xs text-stack-muted font-mono">
+            {result.oldVersion} → BF {result.targetVersion}
+          </div>
+          {result.notes?.length > 0 && (
+            <div className="note text-xs">
+              <div className="font-semibold mb-1">Dropped / changed by the AI:</div>
+              <ul className="list-disc pl-4 space-y-0.5">
+                {result.notes.map((n, i) => <li key={i}>{n}</li>)}
+              </ul>
+            </div>
+          )}
+          {result.rejected?.length > 0 && (
+            <div className="text-xs text-stack-err">
+              Rejected by the validator: <span className="font-mono">{result.rejected.join(' · ')}</span>
+            </div>
+          )}
+          <textarea
+            value={lines}
+            onChange={e => setLines(e.target.value)}
+            spellCheck={false}
+            rows={Math.min(18, lines.split('\n').length + 1)}
+            className="w-full bg-stack-bg border border-stack-border rounded p-3 font-mono text-xs outline-none focus:border-stack-accent"
+          />
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-stack-muted">Edit freely — this is what will run. Review filters and PIDs especially.</div>
+            <button className="btn-primary text-sm" disabled={applying || !detAlive || !lines.trim()}
+              onClick={() => setConfirm(true)}>
+              {applying ? 'Applying…' : done ? 'Applied ✓ — apply again' : 'Apply migrated config'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {confirm && (
+        <ConfirmModal
+          title="Apply migrated configuration"
+          warning="These AI-translated commands will be written to the FC and saved. A wrong filter or PID value can make the aircraft dangerous — confirm you reviewed the list."
+          confirmLabel="I reviewed every line — apply"
+          onCancel={() => setConfirm(false)}
+          onConfirm={apply}
         />
       )}
     </div>

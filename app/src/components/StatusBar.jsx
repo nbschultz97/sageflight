@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
+import { useTelemetry } from '../telemetry';
 
-// Betaflight-style bottom status strip: board identity from the last scan,
-// serial-mutex state, backend version.
+// Betaflight-style bottom status strip. Prefers live telemetry when
+// connected; falls back to the last scan otherwise.
 export default function StatusBar() {
   const [health, setHealth] = useState(null);
   const [scan, setScan] = useState(null);
+  const { connected, telemetry } = useTelemetry();
 
   useEffect(() => {
     let cancelled = false;
@@ -30,12 +32,14 @@ export default function StatusBar() {
 
   return (
     <footer className="h-8 bg-stack-header border-t border-stack-border px-4 flex items-center gap-5 text-[11px] font-mono overflow-x-auto shrink-0">
-      {item('serial', health ? (health.serialBusy ? 'busy' : 'idle') : '—')}
+      {item('link', connected ? 'live' : (health ? (health.serialBusy ? 'busy' : 'idle') : '—'))}
       {fc && item('board', `${fc.boardName || '?'}${fc.manufacturerId ? ` (${fc.manufacturerId})` : ''}`)}
       {fc?.firmware && item('firmware', `BF ${fc.firmware}`)}
-      {fc?.mcuType && item('mcu', fc.mcuType)}
-      {fc?.health?.cycleTime && item('cycle', `${fc.health.cycleTime}µs`)}
-      {!fc && <span className="text-stack-muted">no scan yet — run one in Setup</span>}
+      {connected && telemetry?.analog && item('vbat', `${telemetry.analog.voltage.toFixed(2)}V`)}
+      {connected && telemetry?.analog && item('amps', `${telemetry.analog.amperage.toFixed(1)}A`)}
+      {connected && telemetry?.status && item('cycle', `${telemetry.status.cycleTime}µs`)}
+      {!connected && fc?.health?.cycleTime && item('cycle', `${fc.health.cycleTime}µs`)}
+      {!connected && !fc && <span className="text-stack-muted">no scan yet — connect or run one in Setup</span>}
       <span className="ml-auto text-stack-muted">backend v{health?.version || '—'}</span>
     </footer>
   );

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import SafetyModal from './SafetyModal';
+import { useTelemetry } from '../telemetry';
 
 export default function MotorsTab() {
   const [modal, setModal] = useState(null); // { action, onToken }
@@ -64,6 +65,8 @@ export default function MotorsTab() {
           motors with asymmetric current draw (inter-turn shorts, damaged windings).
         </p>
       </div>
+
+      <LiveMotorBars />
 
       <section className="panel p-5">
         <div className="text-xs uppercase tracking-wide text-stack-muted mb-3">Parameters</div>
@@ -226,6 +229,36 @@ export default function MotorsTab() {
         />
       )}
     </div>
+  );
+}
+
+// Live motor output values from the persistent connection — mirrors the top
+// of Betaflight's Motors tab. The test buttons below suspend the connection
+// while they run, then live data resumes.
+function LiveMotorBars() {
+  const { connected, telemetry } = useTelemetry();
+  if (!connected) return null;
+  const motors = (telemetry?.motor?.motors || []).slice(0, 4);
+  if (motors.length === 0) return null;
+  return (
+    <section className="panel p-5">
+      <div className="text-xs uppercase tracking-wide text-stack-muted mb-3">Live motor output</div>
+      <div className="grid grid-cols-4 gap-4">
+        {motors.map((v, i) => {
+          const pct = Math.max(0, Math.min(100, ((v - 1000) / 1000) * 100));
+          return (
+            <div key={i} className="text-center">
+              <div className="h-32 bg-stack-bg border border-stack-border rounded relative overflow-hidden">
+                <div className="absolute inset-x-0 bottom-0 bg-stack-accent/80"
+                  style={{ height: `${pct}%`, transition: 'height 80ms linear' }} />
+              </div>
+              <div className="mt-2 text-xs font-mono">{v || '—'}</div>
+              <div className="text-xs text-stack-muted">M{i + 1}</div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

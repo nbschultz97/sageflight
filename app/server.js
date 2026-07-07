@@ -1,7 +1,8 @@
-// Local backend for stack-troubleshooter web app.
-// Serves /api endpoints wrapping our existing protocol libraries.
+// Local backend for the Sageflight web app.
+// Serves /api endpoints wrapping our protocol libraries.
 // Hardware actuation endpoints require an explicit safety-confirmation token.
-// All serial access is serialized through a mutex — the FC has one port.
+// All serial access is serialized through a mutex — the FC has one port. The
+// persistent telemetry connection is suspended around every exclusive op.
 
 import express from 'express';
 import cors from 'cors';
@@ -24,6 +25,7 @@ const forensic = require('../lib/forensic-db');
 const { interrogateAll } = require('../lib/esc-4way');
 const { parseIntelHex } = require('../lib/intel-hex');
 const { findDfuUtil, listDfuDevices, enterDfu, flashWithDfuUtil } = require('../lib/flash');
+const { createConnection } = require('../lib/fc-connection');
 
 const VERSION = '0.3.0';
 
@@ -32,6 +34,17 @@ app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
 const serial = createMutex();
+const conn = createConnection();
+
+// Every exclusive serial operation goes through here: the live telemetry
+// connection releases the port first and reconnects afterwards.
+function serialOp(fn) {
+  return serial.runExclusive(async () => {
+    await conn.suspend();
+    try { return await fn(); }
+    finally { await conn.resume(); }
+  });
+}
 
 // ---------- Safety tokens ----------
 // Clients request a token per hardware action; token expires in 60s.
@@ -83,6 +96,40 @@ app.get('/api/ports', async (_req, res) => {
   }
 });
 
+// ---------- Persistent connection + live telemetry ----------
+app.post('/api/connect', async (req, res) => {
+  try {
+    let target = req.body?.port;
+    if (!target) {
+      const det = await detectFC();
+      if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: `no FC on USB (${det.type})` });
+      target = det.comPort;
+    }
+    const r = await serial.runExclusive(() => conn.connect(target));
+    res.json({ ok: true, ...r });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post('/api/disconnect', async (_req, res) => {
+  await conn.disconnect();
+  res.json({ ok: true });
+});
+
+app.get('/api/connection', (_req, res) => {
+  res.json({ ok: true, ...conn.getState() });
+});
+
+// Live telemetry stream — one SSE event ~5×/s while connected.
+app.get('/api/telemetry/stream', (req, res) => {
+  sseHeaders(res);
+  const timer = setInterval(() => {
+    sseSend(res, conn.getState());
+  }, 200);
+  req.on('close', () => clearInterval(timer));
+});
+
 // ---------- Scan FC ----------
 app.post('/api/scan', async (_req, res) => {
   try {
@@ -90,7 +137,7 @@ app.post('/api/scan', async (_req, res) => {
     if (det.type !== 'ALIVE') {
       return res.status(400).json({ ok: false, error: `No FC detected on USB (${det.type})`, detection: det });
     }
-    const fc = await serial.runExclusive(() => scanFC(det.comPort));
+    const fc = await serialOp(() => scanFC(det.comPort));
     res.json({ ok: true, detection: det, fc });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -146,7 +193,7 @@ app.post('/api/motor/spin', async (req, res) => {
   if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: 'no FC on USB' });
 
   try {
-    const result = await serial.runExclusive(() => withCli(det.comPort, async ({ send }) => {
+    const result = await serialOp(() => withCli(det.comPort, async ({ send }) => {
       const idleBuf = await send('status', 2000);
       const vIdle = parseVoltage(idleBuf);
       await send(`motor ${m - 1} ${p}`, 200);
@@ -178,7 +225,7 @@ app.post('/api/motor/compare', async (req, res) => {
   if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: 'no FC on USB' });
 
   try {
-    const results = await serial.runExclusive(() => withCli(det.comPort, async ({ send }) => {
+    const results = await serialOp(() => withCli(det.comPort, async ({ send }) => {
       const out = [];
       for (let m = 0; m < 4; m++) {
         const idleBuf = await send('status', 1500);
@@ -223,7 +270,7 @@ app.post('/api/esc/interrogate', async (req, res) => {
   if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: `no FC on USB (${det.type})` });
 
   try {
-    const result = await serial.runExclusive(() => interrogateAll(det.comPort));
+    const result = await serialOp(() => interrogateAll(det.comPort));
     store.appendHistory({ kind: 'esc.interrogate', ...result });
     res.json({ ok: true, ...result });
   } catch (e) {
@@ -259,7 +306,7 @@ app.post('/api/config/backup', async (_req, res) => {
     const det = await detectFC();
     if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: `no FC on USB (${det.type})` });
 
-    const { boardName, diff } = await serial.runExclusive(() => withCli(det.comPort, async ({ send }) => {
+    const { boardName, diff } = await serialOp(() => withCli(det.comPort, async ({ send }) => {
       const nameRaw = await send('board_name', 1000);
       const nameLine = nameRaw.split('\n').map(l => l.trim()).filter(l => l.startsWith('board_name')).pop();
       const boardName = nameLine ? nameLine.replace('board_name', '').trim() : 'unknown-board';
@@ -313,7 +360,7 @@ app.post('/api/cli', async (req, res) => {
 
   try {
     const waitMs = /^(diff|dump)/.test(cls.verb) ? 8000 : 1500;
-    const output = await serial.runExclusive(() =>
+    const output = await serialOp(() =>
       withCli(det.comPort, async ({ send }) => send(line, waitMs))
     );
     res.json({ ok: true, command: line, kind: cls.kind, output: output.trim() });
@@ -329,7 +376,7 @@ app.post('/api/cli/batch', async (req, res) => {
   const { commands, token } = req.body || {};
   const list = Array.isArray(commands) ? commands.map(c => String(c).trim()).filter(Boolean) : [];
   if (list.length === 0) return res.status(400).json({ ok: false, error: 'commands must be a non-empty array' });
-  if (list.length > 50) return res.status(400).json({ ok: false, error: 'max 50 commands per batch' });
+  if (list.length > 300) return res.status(400).json({ ok: false, error: 'max 300 commands per batch' });
 
   for (const line of list) {
     if (line.length > 200 || /[\r\n]/.test(line)) {
@@ -349,11 +396,11 @@ app.post('/api/cli/batch', async (req, res) => {
 
   const savesLast = list[list.length - 1]?.toLowerCase() === 'save';
   try {
-    const results = await serial.runExclusive(() => withCli(det.comPort, async ({ send }) => {
+    const results = await serialOp(() => withCli(det.comPort, async ({ send }) => {
       const out = [];
       for (const line of list) {
         // `save` reboots the FC and drops the port — tolerate a dead write.
-        const output = await send(line, line.toLowerCase() === 'save' ? 1500 : 400).catch(() => '');
+        const output = await send(line, line.toLowerCase() === 'save' ? 1500 : 150).catch(() => '');
         out.push({ command: line, output: String(output).trim() });
       }
       return out;
@@ -490,7 +537,7 @@ app.post('/api/flash/run', async (req, res) => {
     let det = await detectFC();
     if (det.type === 'ALIVE') {
       stage('dfu', `Rebooting ${det.comPort} into DFU bootloader (CLI "bl")...`);
-      await serial.runExclusive(() => enterDfu(det.comPort));
+      await serialOp(() => enterDfu(det.comPort));
     } else if (det.type !== 'DFU') {
       return fail(`FC must be ALIVE or already in DFU mode (currently: ${det.type})`);
     }
@@ -537,7 +584,7 @@ app.post('/api/flash/run', async (req, res) => {
     }
 
     stage('verify', `FC back on ${back.comPort} — reading identity...`);
-    const fc = await serial.runExclusive(() => scanFC(back.comPort));
+    const fc = await serialOp(() => scanFC(back.comPort));
     const { rawStatus, rawDiff, ...summary } = fc;
     store.appendHistory({ kind: 'flash.run', firmware, ok: true, verified: true, boardName: fc.boardName, firmwareVersion: fc.firmware });
     sseSend(res, { done: true, verified: true, fc: summary });
@@ -570,7 +617,7 @@ app.post('/api/config/restore', async (req, res) => {
   if (det.type !== 'ALIVE') return fail(`no FC on USB (${det.type})`);
 
   try {
-    await serial.runExclusive(() => withCli(det.comPort, async ({ send }) => {
+    await serialOp(() => withCli(det.comPort, async ({ send }) => {
       sseSend(res, { stage: 'restore', msg: `Replaying ${lines.length} config lines from ${backupId}...` });
       for (let i = 0; i < lines.length; i++) {
         await send(lines[i], 120);
@@ -586,6 +633,177 @@ app.post('/api/config/restore', async (req, res) => {
     res.end();
   } catch (e) {
     fail(e.message);
+  }
+});
+
+// ---------- Blackbox (v1: header/settings analysis + AI tune review) ----------
+const { parseHeaders, selectTuningSettings } = require('../lib/blackbox-header');
+
+app.post('/api/blackbox/upload', express.raw({ limit: '128mb', type: () => true }), (req, res) => {
+  const name = String(req.query.name || 'log.bbl');
+  const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  if (buf.length === 0) return res.status(400).json({ ok: false, error: 'empty upload' });
+  const parsed = parseHeaders(buf);
+  if (!parsed) return res.status(400).json({ ok: false, error: 'no blackbox headers found — is this a .bbl/.bfl log?' });
+  const meta = {
+    firmware: parsed.firmware,
+    board: parsed.board,
+    craft: parsed.craft,
+    logCount: parsed.logCount,
+  };
+  const { name: savedName } = store.saveBlackbox(name, buf, meta);
+  res.json({ ok: true, name: savedName, ...meta, tuning: selectTuningSettings(parsed.settings) });
+});
+
+app.get('/api/blackbox/logs', (_req, res) => {
+  res.json({ ok: true, logs: store.listBlackboxes() });
+});
+
+app.get('/api/blackbox/logs/:name', (req, res) => {
+  const buf = store.readBlackbox(req.params.name);
+  if (!buf) return res.status(404).json({ ok: false, error: 'log not found' });
+  const parsed = parseHeaders(buf);
+  if (!parsed) return res.status(500).json({ ok: false, error: 'could not parse headers' });
+  const { settings, ...summary } = parsed;
+  res.json({ ok: true, ...summary, tuning: selectTuningSettings(settings) });
+});
+
+// AI tune review from the log's embedded settings — streamed like chat.
+app.post('/api/blackbox/review', async (req, res) => {
+  const { name, model = 'llama3.1:8b' } = req.body || {};
+  sseHeaders(res);
+  const buf = store.readBlackbox(name);
+  if (!buf) { sseSend(res, { error: 'log not found' }); return res.end(); }
+  const parsed = parseHeaders(buf);
+  if (!parsed) { sseSend(res, { error: 'could not parse headers' }); return res.end(); }
+
+  const tuning = selectTuningSettings(parsed.settings);
+  const prompt = [
+    'Review this Betaflight tune from a blackbox log header. You are an expert FPV tuner.',
+    `Firmware: ${parsed.firmware || 'unknown'} · Board: ${parsed.board || 'unknown'} · Craft: ${parsed.craft || 'unnamed'}`,
+    '',
+    'Tuning state at time of flight (key:value):',
+    JSON.stringify(tuning, null, 1).slice(0, 12000),
+    '',
+    'Give a structured review:',
+    '1. **Filters** — anything unusually low/high or disabled? RPM filter vs bidirectional DShot consistency?',
+    '2. **PIDs & feedforward** — obviously out-of-family values for this class of quad?',
+    '3. **Known-bad combinations** — settings that conflict or are dangerous together.',
+    '4. **Top 3 concrete suggestions** — exact `set x = y` lines, most impactful first.',
+    'Be direct. If everything looks stock/sane, say so. Note that frame-level (noise/step-response) analysis is not included in this review.',
+  ].join('\n');
+
+  try {
+    const r = await fetch(OLLAMA_HOST + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], stream: true }),
+    });
+    if (!r.ok || !r.body) throw new Error(`Ollama: ${r.status}`);
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf2 = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf2 += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf2.indexOf('\n')) !== -1) {
+        const line = buf2.slice(0, nl).trim();
+        buf2 = buf2.slice(nl + 1);
+        if (!line) continue;
+        try {
+          const chunk = JSON.parse(line);
+          if (chunk.message?.content) sseSend(res, { token: chunk.message.content });
+          if (chunk.done) { sseSend(res, { done: true }); res.end(); return; }
+        } catch {}
+      }
+    }
+    res.end();
+  } catch (e) {
+    sseSend(res, { error: e.message });
+    res.end();
+  }
+});
+
+// ---------- AI config migration (old firmware diff → new firmware) ----------
+// Community pain point: pasting an old `diff all` into new firmware silently
+// drops renamed parameters (e.g. filter settings), which can burn motors.
+// The LLM translates the old diff for the target version; every returned
+// line is re-validated, and application still requires human approval +
+// a config.write token via /api/cli/batch.
+app.post('/api/config/migrate', async (req, res) => {
+  const { backupId, model = 'llama3.1:8b', targetVersion = 'unknown' } = req.body || {};
+  const content = store.readBackup(backupId);
+  if (content == null) return res.status(404).json({ ok: false, error: `backup "${backupId}" not found` });
+
+  const oldVersionLine = content.split('\n').find(l => /# Betaflight/i.test(l)) || 'unknown';
+
+  const prompt = [
+    'You are migrating a Betaflight configuration between firmware versions.',
+    `OLD firmware header: ${oldVersionLine.trim()}`,
+    `TARGET firmware version: Betaflight ${targetVersion}`,
+    '',
+    'Translate the old `diff all` below into commands that are SAFE to replay on the target version:',
+    '- Keep settings whose parameter names are unchanged on the target version.',
+    '- Rename parameters that were renamed between the versions.',
+    '- DROP parameters that were removed or that you are not sure still exist — list each dropped line in notes with a one-line reason.',
+    '- Always keep: board/serial/aux/feature/map lines, PIDs, rates.',
+    '- Never emit destructive commands (defaults, flash_erase, motor, dfu, bl).',
+    '- The final command must be exactly: save',
+    '',
+    'Respond with ONLY valid JSON: {"commands": ["...", ...], "notes": ["...", ...]}',
+    '',
+    'OLD DIFF:',
+    '```',
+    content.slice(0, 24000),
+    '```',
+  ].join('\n');
+
+  try {
+    const r = await fetch(OLLAMA_HOST + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        stream: false,
+        format: 'json',
+        options: { temperature: 0.1 },
+      }),
+      signal: AbortSignal.timeout(180000),
+    });
+    if (!r.ok) throw new Error(`Ollama: ${r.status} ${(await r.text()).slice(0, 200)}`);
+    const data = await r.json();
+    let parsed;
+    try { parsed = JSON.parse(data.message?.content || '{}'); }
+    catch { throw new Error('model returned invalid JSON — try a larger model'); }
+
+    const notes = Array.isArray(parsed.notes) ? parsed.notes.map(String) : [];
+    const commands = [];
+    const rejected = [];
+    for (const raw of Array.isArray(parsed.commands) ? parsed.commands : []) {
+      const line = String(raw).trim();
+      if (!line || line.startsWith('#')) continue;
+      const cls = classifyCliCommand(line);
+      if (cls.kind === 'forbidden' || cls.kind === 'unknown' || cls.kind === 'invalid') rejected.push(line);
+      else commands.push(line);
+    }
+    if (commands.length === 0) throw new Error('model produced no valid commands');
+    if (commands[commands.length - 1].toLowerCase() !== 'save') commands.push('save');
+
+    res.json({
+      ok: true,
+      backupId,
+      oldVersion: oldVersionLine.trim(),
+      targetVersion,
+      commands,
+      notes,
+      rejected,
+      warning: 'AI-translated config. Review every line before applying — especially filter and PID settings.',
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
@@ -667,9 +885,10 @@ const execTool = createToolExecutor({
   detectFC,
   scanFC,
   withCli,
-  runExclusive: serial.runExclusive,
+  runExclusive: serialOp,
   store,
   forensic,
+  connection: conn,
 });
 
 const MAX_AGENT_ROUNDS = 6;
@@ -681,8 +900,9 @@ app.post('/api/agent/chat', async (req, res) => {
   const convo = [
     { role: 'system', content: readSystemPrompt() +
       '\n\nYou have live tools: detect_fc, scan_fc, get_config_diff, get_motor_history, list_config_backups,' +
-      ' get_forensic_record, list_forensic_units, get_last_esc_scan, propose_config_changes.' +
+      ' get_forensic_record, list_forensic_units, get_last_esc_scan, get_live_telemetry, propose_config_changes.' +
       ' Use them to look at the aircraft instead of asking the user for information a tool can fetch.' +
+      ' For "why won\'t it arm" questions, call get_live_telemetry first — it decodes the arming-disable flags.' +
       ' To change configuration, use propose_config_changes — the user reviews and approves the commands before they run.' +
       ' You can NOT spin motors or flash firmware — direct the user to the Motors/Flash tabs for that.' },
     ...messages,

@@ -15,32 +15,38 @@
   ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 ```
 
-A Betaflight-Configurator-style tool with a brain. Sageflight detects,
-diagnoses, configures, and flashes Betaflight stacks — with an offline LLM
-copilot (Ollama) that can inspect the aircraft itself and propose fixes you
-approve with one click.
+**Betaflight/INAV-style configurator on steroids.** One tool that observes
+AND acts: live telemetry the moment you hit Connect, guided troubleshooting,
+motor and ESC diagnostics, config management, firmware flashing — with an
+offline LLM copilot (Ollama) that inspects the aircraft itself, explains what
+it sees, and proposes fixes you approve with one click.
 
 No cloud, no data exfil. Everything runs on your laptop. Cross-platform:
 Windows, macOS, Linux.
 
-Active-mode companion to [stack-forensic](https://github.com/nbschultz97/fc-forensic):
-where the forensic tool **observes**, Sageflight **acts** — and it reads the
-forensic database, so the moment you plug a board in it knows that unit's
-entire case history.
+Sageflight also reads the [fc-forensic](https://github.com/nbschultz97/fc-forensic)
+database (the formal, read-only forensic instrument): plug in a board and its
+entire case history appears automatically.
 
-## Why a separate tool from stack-forensic?
+## Built for the gaps
 
-| | stack-forensic | sageflight |
-|---|---|---|
-| Purpose | Diagnose | Act |
-| Writes to FC? | No | Yes |
-| Spins motors? | No | Yes |
-| Flashes firmware? | No | Yes |
-| Runs LLM? | No | Yes (Ollama, local) |
-| Ships with CI safety claim | "Read-only" | "Hardware-actuating" |
+Sageflight targets the pain points the existing toolchain leaves open:
 
-Mixing the two weakens the forensic tool's defensibility. They share protocol
-libraries but stay separate at the product level.
+- **"Why won't it arm?"** — the #1 beginner wall. Sageflight decodes every
+  arming-disable flag live and tells you the *fix*, not just the flag name.
+  The AI can read them too (`get_live_telemetry`).
+- **Tune analysis without MATLAB** — PIDtoolbox is abandoned and never told
+  you what to change. The Blackbox tab reads the full tuning state embedded
+  in your log and the AI reviews it: filters, PIDs, dangerous combinations,
+  concrete `set` suggestions.
+- **Firmware-version config migration** — pasting an old diff into new
+  firmware silently drops renamed parameters (the classic burned-motor
+  trap). The AI translates your old diff for the target version; you review
+  every line before it runs.
+- **ESC visibility without extra tools** — 4-way interrogation built in; no
+  BLHeliSuite side-quest just to see what firmware your ESCs run.
+- **A knowledgeable bench partner** — every setting, failure mode, and next
+  step explainable in plain English, offline.
 
 ## Quick start
 
@@ -62,13 +68,16 @@ npm start
 
 ## Tabs
 
-- **Setup** — live USB polling, one-click FC scan (board identity, firmware,
-  sensors, health). If the board exists in your fc-forensic database, its
-  forensic history (unit status, prior scans, linked ESC records) appears
-  automatically, matched by MCU id.
-- **Motors** — safety-gated single-motor spin and 4-motor voltage-sag
-  comparison (flags outliers consistent with inter-turn shorts). Every test
-  logged to local history.
+- **Setup** — hit **Connect** for a live link (like Betaflight): artificial
+  horizon, battery voltage/current, RSSI, cycle time — plus the **arming
+  doctor**: every active arming-disable flag decoded with a plain-English
+  fix. One-click FC scan reads board identity, firmware, sensors, health,
+  and cross-references your fc-forensic case history by MCU id.
+- **Receiver** — live RC channel bars. Verify endpoints, centering, channel
+  map, and link health before you ever arm.
+- **Motors** — live motor output bars while connected, plus safety-gated
+  single-motor spin and 4-motor voltage-sag comparison (flags outliers
+  consistent with inter-turn shorts). Every test logged to local history.
 - **ESC** — BLHeli 4-way interrogation of all four ESCs: chip signature,
   MCU, firmware family (BLHeli_S / BLHeli_32 / AM32 / Bluejay / JESC),
   firmware version and name from the settings EEPROM. Read-only; ESCs are
@@ -78,6 +87,9 @@ npm start
   backups, gated CLI console (read commands free; writes need confirmation +
   an existing backup; destructive commands refused), and backup **restore**
   (replays a backup line-by-line and saves).
+- **Blackbox** — upload a .bbl/.bfl log; Sageflight parses the complete
+  tuning state from the log header and the AI reviews the tune (v1 —
+  frame-level noise/step-response analysis is on the roadmap).
 - **Checklists** — guided build → configuration → preflight checklists per
   airframe class (5" freestyle, cinewhoop, 7" long-range, whoop).
 - **AI Assistant** — offline LLM via Ollama with streaming, markdown, and a
@@ -100,7 +112,9 @@ npm start
   3. requires a config backup before the flash button unlocks
   4. reboots the FC into DFU (`bl`), streams the dfu-util log live, then
      **verifies** — waits for re-enumeration and re-scans the board
-  5. one-click config restore from your backup afterwards
+  5. config restore afterwards: verbatim replay for same-version flashes, or
+     the **AI migration assistant** for version jumps (translates renamed
+     parameters, drops dead ones with notes, human-reviewed before apply)
 
 ## Safety model
 
@@ -189,7 +203,16 @@ Local runtime data (config backups, staged firmware, test history) lives in
 - [x] ESC interrogation UI via BLHeli 4-way passthrough
 - [x] AI config proposals with human approve (propose → review → apply)
 - [x] Electron desktop shell
-- [ ] Blackbox log analysis (AI-assisted tune review)
+- [x] Persistent connection + live telemetry (attitude, RC, motors, battery)
+- [x] Arming doctor — decoded arming-disable flags with fixes, AI-readable
+- [x] AI config migration between firmware versions
+- [x] Blackbox v1 — header/tune parsing + AI tune review
+- [ ] Blackbox v2 — frame decoding: gyro noise spectra, step response, and
+      AI recommendations from actual flight data (the PIDtoolbox successor)
+- [ ] Modes/Ports editors (aux ranges, UART functions) with AI explanations
+- [ ] ESC settings write + flashing (Bluejay/AM32) — esc-configurator parity
+- [ ] Config timeline — auto-snapshot every change, "what changed since last
+      session?" diffing across your fleet
 - [ ] Packaged installers (electron-builder)
 - [ ] INAV / ArduPilot support
 
