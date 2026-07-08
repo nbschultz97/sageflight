@@ -557,6 +557,74 @@ app.post('/api/flash/fetch', async (req, res) => {
   }
 });
 
+// ---------- Cloud build (build.betaflight.com — custom firmware) ----------
+const cloudBuild = require('../lib/cloud-build');
+
+let cloudTargetsCache = { at: 0, data: null };
+
+app.get('/api/flash/cloud/targets', async (_req, res) => {
+  try {
+    if (!cloudTargetsCache.data || Date.now() - cloudTargetsCache.at > 30 * 60 * 1000) {
+      cloudTargetsCache = { at: Date.now(), data: await cloudBuild.fetchTargets() };
+    }
+    res.json({ ok: true, online: true, targets: cloudTargetsCache.data });
+  } catch (e) {
+    res.json({ ok: true, online: false, error: e.message, targets: [] });
+  }
+});
+
+app.get('/api/flash/cloud/releases', async (req, res) => {
+  const target = String(req.query.target || '');
+  if (!target) return res.status(400).json({ ok: false, error: 'missing target' });
+  try {
+    const detail = await cloudBuild.fetchTargetReleases(target);
+    res.json({ ok: true, online: true, ...detail });
+  } catch (e) {
+    res.json({ ok: true, online: false, error: e.message, releases: [] });
+  }
+});
+
+app.get('/api/flash/cloud/options', async (req, res) => {
+  const release = String(req.query.release || '');
+  if (!release) return res.status(400).json({ ok: false, error: 'missing release' });
+  try {
+    res.json({ ok: true, online: true, options: await cloudBuild.fetchOptions(release) });
+  } catch (e) {
+    res.json({ ok: true, online: false, error: e.message, options: null });
+  }
+});
+
+// Submit a cloud build, poll to completion, stage the resulting hex into the
+// firmware store (same place uploads/release fetches land). SSE progress.
+// No hardware is touched here — flashing stays behind /api/flash/run.
+app.post('/api/flash/cloud/build', async (req, res) => {
+  const { target, release, selections = {} } = req.body || {};
+  sseHeaders(res);
+  try {
+    const request = cloudBuild.assembleBuildRequest(String(target || ''), String(release || ''), selections);
+    sseSend(res, { stage: 'request', msg: `Options: ${request.options.join(', ')}` });
+    const result = await cloudBuild.runCloudBuild(request, (ev) => sseSend(res, { stage: ev.phase, msg: ev.msg }));
+
+    const parsed = parseIntelHex(result.hexText);
+    const meta = {
+      baseAddress: parsed.baseAddressHex,
+      totalBytes: parsed.totalBytes,
+      dataBytes: parsed.dataBytes,
+      source: `cloud-build ${target}@${release}`,
+      buildKey: result.key,
+      buildLog: result.logUrl,
+      buildOptions: request.options,
+    };
+    const { name } = store.saveFirmware(result.file, result.hexText, meta);
+    store.appendHistory({ kind: 'flash.cloudbuild', target, release, options: request.options.length, firmware: name });
+    sseSend(res, { done: true, name, logUrl: result.logUrl, ...meta });
+    res.end();
+  } catch (e) {
+    sseSend(res, { error: e.message });
+    res.end();
+  }
+});
+
 // The full guarded flash sequence, streamed as SSE stages.
 app.post('/api/flash/run', async (req, res) => {
   const { token, firmware } = req.body || {};
@@ -1392,8 +1460,8 @@ if (process.env.NODE_ENV === 'production') {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`[stack-troubleshooter] API server v${VERSION} on http://localhost:${PORT}`);
+  console.log(`[sageflight] API server v${VERSION} on http://localhost:${PORT}`);
   if (process.env.NODE_ENV !== 'production') {
-    console.log(`[stack-troubleshooter] Vite dev server on http://localhost:5173 (open this one)`);
+    console.log(`[sageflight] Vite dev server on http://localhost:5173 (open this one)`);
   }
 });

@@ -274,6 +274,13 @@ export default function FlashTab() {
           </div>
         )}
 
+        <CloudBuildPanel
+          boardName={boardName}
+          busy={busy}
+          readSse={readSse}
+          onStaged={async (name) => { setSelected(name); await refresh(); }}
+        />
+
         <div>
           <div className="text-xs text-stack-muted mb-2">Staged firmware (select one):</div>
           {firmwares.length === 0 && <div className="text-sm text-stack-muted">Nothing staged yet.</div>}
@@ -387,6 +394,199 @@ export default function FlashTab() {
           onCancel={() => setRestore(null)}
           onConfirm={() => runRestore(restore)}
         />
+      )}
+    </div>
+  );
+}
+
+// Custom cloud build via build.betaflight.com — the same service Betaflight
+// Configurator uses. Pick target + release + firmware options; the service
+// compiles a custom hex which lands in the staged-firmware list. Building
+// touches no hardware; flashing stays behind the gated flash flow.
+function CloudBuildPanel({ boardName, busy, readSse, onStaged }) {
+  const [open, setOpen] = useState(false);
+  const [targets, setTargets] = useState(null);       // [{target, mcu, manufacturer}]
+  const [target, setTarget] = useState('');
+  const [releases, setReleases] = useState(null);     // [{release, type, label, cloudBuild}]
+  const [release, setRelease] = useState('');
+  const [options, setOptions] = useState(null);       // { radioProtocols, telemetryProtocols, motorProtocols, osdProtocols?, generalOptions }
+  const [coreBuild, setCoreBuild] = useState(false);
+  const [radio, setRadio] = useState('');
+  const [telemetry, setTelemetry] = useState('');
+  const [motor, setMotor] = useState('');
+  const [osd, setOsd] = useState('');
+  const [checked, setChecked] = useState({});          // define value -> bool
+  const [defines, setDefines] = useState('');          // expert custom defines
+  const [building, setBuilding] = useState(false);
+  const [log, setLog] = useState([]);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!open || targets) return;
+    fetch('/api/flash/cloud/targets').then(r => r.json()).then(j => {
+      setTargets(j.targets || []);
+      if (!j.online) setError(`Build service unreachable: ${j.error || 'offline'}`);
+      else if (boardName && (j.targets || []).some(t => t.target === boardName)) setTarget(boardName);
+    }).catch(e => setError(e.message));
+  }, [open]);
+
+  useEffect(() => {
+    if (!target) { setReleases(null); setRelease(''); return; }
+    setReleases(null); setRelease(''); setOptions(null);
+    fetch(`/api/flash/cloud/releases?target=${encodeURIComponent(target)}`).then(r => r.json()).then(j => {
+      const rels = (j.releases || []).filter(r2 => !r2.withdrawn);
+      setReleases(rels);
+      const firstStable = rels.find(r2 => r2.type === 'Stable') || rels[0];
+      if (firstStable) setRelease(firstStable.release);
+    }).catch(e => setError(e.message));
+  }, [target]);
+
+  useEffect(() => {
+    if (!release) { setOptions(null); return; }
+    setOptions(null);
+    fetch(`/api/flash/cloud/options?release=${encodeURIComponent(release)}`).then(r => r.json()).then(j => {
+      setOptions(j.options || null);
+      const def = (list) => (list || []).find(o => o.default)?.value || '';
+      setRadio(def(j.options?.radioProtocols));
+      setTelemetry(def(j.options?.telemetryProtocols));
+      setMotor(def(j.options?.motorProtocols));
+      setOsd(def(j.options?.osdProtocols));
+      const init = {};
+      for (const o of j.options?.generalOptions || []) if (o.default) init[o.value] = true;
+      setChecked(init);
+    }).catch(e => setError(e.message));
+  }, [release]);
+
+  async function build() {
+    setBuilding(true); setError(null); setLog([]);
+    try {
+      const selections = coreBuild ? { coreBuild: true } : {
+        radioProtocol: radio, telemetryProtocol: telemetry,
+        motorProtocol: motor, osdProtocol: osd,
+        options: Object.entries(checked).filter(([, v]) => v).map(([k]) => k),
+        customDefines: defines.split(/[\s,]+/).filter(Boolean),
+      };
+      const res = await fetch('/api/flash/cloud/build', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target, release, selections }),
+      });
+      if (!res.ok || !res.body) throw new Error('build stream failed to open');
+      let staged = null;
+      await readSse(res, (obj) => {
+        if (obj.error) setError(obj.error);
+        else if (obj.done) { staged = obj; setLog(l => [...l, { stage: 'done', msg: `Staged ${obj.name} (${Math.round(obj.totalBytes / 1024)} KB)` }]); }
+        else if (obj.stage) setLog(l => [...l, obj]);
+      });
+      if (staged) await onStaged(staged.name);
+    } catch (e) { setError(e.message); }
+    finally { setBuilding(false); }
+  }
+
+  const Select = ({ label, value, set, list }) => (list || []).length > 0 && (
+    <label className="block">
+      <span className="text-stack-muted text-xs block mb-1">{label}</span>
+      <select value={value} onChange={e => set(e.target.value)} disabled={coreBuild}
+        className="w-full bg-stack-bg border border-stack-border rounded px-2 py-1.5 text-xs font-mono disabled:opacity-40">
+        <option value="">none</option>
+        {list.map(o => <option key={o.value} value={o.value}>{o.name}</option>)}
+      </select>
+    </label>
+  );
+
+  return (
+    <div className="border border-stack-border rounded-lg">
+      <button className="w-full flex items-center justify-between px-4 py-3 text-sm" onClick={() => setOpen(o => !o)}>
+        <span>
+          <span className="text-stack-text font-semibold">Custom cloud build</span>
+          <span className="text-stack-muted"> — compile firmware with exactly the features you need (build.betaflight.com)</span>
+        </span>
+        <span className="text-stack-muted">{open ? '▾' : '▸'}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 space-y-4">
+          <div className="grid md:grid-cols-2 gap-4">
+            <label className="block">
+              <span className="text-stack-muted text-xs block mb-1">Target ({targets ? targets.length : '…'} available)</span>
+              <input list="cloud-targets" value={target} onChange={e => setTarget(e.target.value.toUpperCase())}
+                placeholder={boardName || 'e.g. SPEEDYBEEF405V4'}
+                className="w-full bg-stack-bg border border-stack-border rounded px-2 py-1.5 text-xs font-mono" />
+              <datalist id="cloud-targets">
+                {(targets || []).map(t => <option key={t.target} value={t.target}>{t.mcu}</option>)}
+              </datalist>
+            </label>
+            <label className="block">
+              <span className="text-stack-muted text-xs block mb-1">Release</span>
+              <select value={release} onChange={e => setRelease(e.target.value)}
+                disabled={!releases?.length}
+                className="w-full bg-stack-bg border border-stack-border rounded px-2 py-1.5 text-xs font-mono disabled:opacity-40">
+                {(releases || []).map(r => (
+                  <option key={r.release} value={r.release}>{r.release} · {r.type}{r.cloudBuild ? '' : ' (no cloud build)'}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {options && (
+            <>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={coreBuild} onChange={e => setCoreBuild(e.target.checked)}
+                  className="w-4 h-4 accent-stack-accent" />
+                <span>Default build (CORE_BUILD) — standard feature set, ignore selections below</span>
+              </label>
+
+              <div className="grid md:grid-cols-4 gap-3">
+                <Select label="Radio protocol" value={radio} set={setRadio} list={options.radioProtocols} />
+                <Select label="Telemetry" value={telemetry} set={setTelemetry} list={options.telemetryProtocols} />
+                <Select label="Motor protocol" value={motor} set={setMotor} list={options.motorProtocols} />
+                <Select label="OSD" value={osd} set={setOsd} list={options.osdProtocols} />
+              </div>
+
+              {(options.generalOptions || []).length > 0 && (
+                <div>
+                  <div className="text-xs text-stack-muted mb-2">Features:</div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1.5">
+                    {options.generalOptions.map(o => (
+                      <label key={o.value} className={['flex items-center gap-2 text-xs', coreBuild ? 'opacity-40' : 'cursor-pointer'].join(' ')}>
+                        <input type="checkbox" disabled={coreBuild} checked={!!checked[o.value]}
+                          onChange={e => setChecked(c => ({ ...c, [o.value]: e.target.checked }))}
+                          className="w-3.5 h-3.5 accent-stack-accent" />
+                        <span className="truncate" title={o.value}>{o.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <label className="block">
+                <span className="text-stack-muted text-xs block mb-1">Extra defines (expert, space-separated)</span>
+                <input value={defines} onChange={e => setDefines(e.target.value)} disabled={coreBuild}
+                  placeholder="USE_ACRO_TRAINER …"
+                  className="w-full bg-stack-bg border border-stack-border rounded px-2 py-1.5 text-xs font-mono disabled:opacity-40" />
+              </label>
+            </>
+          )}
+
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-stack-muted">
+              Build runs on Betaflight's servers (~30 s) and lands in the staged list below. Needs internet.
+            </div>
+            <button className={(!busy && !building && target && release) ? 'btn-primary text-sm' : 'btn-ghost text-sm opacity-50 cursor-not-allowed'}
+              disabled={busy || building || !target || !release} onClick={build}>
+              {building ? 'Building…' : 'Build firmware'}
+            </button>
+          </div>
+
+          {log.length > 0 && (
+            <div className="bg-stack-bg border border-stack-border rounded p-3 text-xs font-mono max-h-40 overflow-auto space-y-0.5">
+              {log.map((e, i) => (
+                <div key={i}><span className="text-stack-accent">[{e.stage}]</span> {e.msg}</div>
+              ))}
+            </div>
+          )}
+          {error && <div className="text-sm text-stack-err">{error}</div>}
+        </div>
       )}
     </div>
   );

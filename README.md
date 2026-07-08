@@ -156,8 +156,11 @@ npm run dist       # build the Windows installer (desktop/release/)
 - **Firmware Flasher** — the firmware-safe flash workflow:
   1. checks for `dfu-util` and shows install instructions if missing
   2. recommends official Betaflight release hexes matched to your scanned
-     board target (when online) or takes a local `.hex` (validated Intel HEX,
-     converted to binary server-side)
+     board target (when online), takes a local `.hex` (validated Intel HEX,
+     converted to binary server-side), or runs a **custom cloud build** —
+     the same build.betaflight.com service Configurator uses: pick target,
+     release, radio/telemetry/motor protocols, features, and expert defines;
+     the compiled hex lands in the staged list with its build log linked
   3. requires a config backup before the flash button unlocks
   4. reboots the FC into DFU (`bl`), streams the dfu-util log live, then
      **verifies** — waits for re-enumeration and re-scans the board
@@ -343,8 +346,9 @@ Local runtime data (config backups, staged firmware, test history) lives in
 
 ### Next — close the remaining Betaflight gaps (capability)
 
-- [ ] Cloud build support — Betaflight build API: pick target + build
-      options, server-side build, flash the custom hex
+- [x] Cloud build support — Betaflight build API: pick target + release +
+      protocols/features/defines, server-side compile, staged for flashing
+      (verified live against build.betaflight.com)
 - [ ] Blackbox download from the FC — MSP dataflash read + erase, so the
       whole tune loop (fly → download → analyze → fix) happens in one tool
 - [ ] GPS + Failsafe tabs — failsafe stage 1/2 editor with plain-English
