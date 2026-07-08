@@ -1,19 +1,6 @@
-# Sageflight
-
-```
-  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-  ┃                                                        ┃
-  ┃   ███████╗ █████╗  ██████╗ ███████╗                    ┃
-  ┃   ██╔════╝██╔══██╗██╔════╝ ██╔════╝                    ┃
-  ┃   ███████╗███████║██║  ███╗█████╗                      ┃
-  ┃   ╚════██║██╔══██║██║   ██║██╔══╝                      ┃
-  ┃   ███████║██║  ██║╚██████╔╝███████╗                    ┃
-  ┃   ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝ FLIGHT             ┃
-  ┃                                                        ┃
-  ┃   AI-native FPV configurator & troubleshooter · v0.3   ┃
-  ┃                                                        ┃
-  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-```
+<p align="center">
+  <img src="assets/sageflight-wordmark.svg" alt="Sageflight — AI-native FPV configurator" width="560" />
+</p>
 
 **Betaflight/INAV-style configurator on steroids.** One tool that observes
 AND acts: live telemetry the moment you hit Connect, guided troubleshooting,
@@ -21,12 +8,8 @@ motor and ESC diagnostics, config management, firmware flashing — with an
 offline LLM copilot (Ollama) that inspects the aircraft itself, explains what
 it sees, and proposes fixes you approve with one click.
 
-No cloud, no data exfil. Everything runs on your laptop. Cross-platform:
-Windows, macOS, Linux.
-
-Sageflight also reads the [fc-forensic](https://github.com/nbschultz97/fc-forensic)
-database (the formal, read-only forensic instrument): plug in a board and its
-entire case history appears automatically.
+Fully standalone. No cloud, no accounts, no data exfil — everything runs on
+your laptop. Cross-platform: Windows, macOS, Linux.
 
 ## Built for the gaps
 
@@ -94,7 +77,8 @@ npm start
   horizon, battery voltage/current, RSSI, cycle time — plus the **arming
   doctor**: every active arming-disable flag decoded with a plain-English
   fix. One-click FC scan reads board identity, firmware, sensors, health,
-  and cross-references your fc-forensic case history by MCU id.
+  and pulls up this exact board's saved case history by MCU id (if you keep
+  a local bench-history database — see Import & export).
 - **Receiver** — live RC channel bars. Verify endpoints, centering, channel
   map, and link health before you ever arm.
 - **Modes** — aux switch range editor with live switch-position markers:
@@ -185,30 +169,33 @@ Layers the LLM cannot bypass:
 All serial access is serialized through a mutex — a scan can never collide
 with a motor test.
 
-## Ecosystem integrations (all optional — Sageflight is fully standalone)
+## Import & export
 
-Every Ceradon tool works on its own; integrations are loose file/data
-contracts, never runtime dependencies.
+Everything Sageflight produces or consumes is a plain, portable file — the
+same philosophy as Betaflight's `diff all`. No lock-in, no required
+companions:
 
-- **COTS-Architect (planning/inventory) → Sageflight**: export a planned
-  build as [Ceradon Loadout v1 JSON](docs/loadout-schema.md), import it in
-  the Checklists tab. You get a kit-check stage, the right checklist set
-  auto-selected, and one-click **as-built verification** — planned board
-  target / firmware / motor count / ESC firmware vs. what the bench
-  actually reports. The AI reads the plan via `get_loadout`.
-- **cots-catalog → Sageflight**: hardware-spec lookups for the AI
-  (`search_catalog` tool) and API. Sources, in order: `COTS_CATALOG_PATH`,
-  a sibling `cots-catalog` checkout, or a one-time downloaded copy
-  (`POST /api/catalog/fetch`). No catalog → the tool degrades gracefully.
-- **fc-forensic → Sageflight**: see below.
-
-## stack-forensic integration
-
-Sageflight looks for your fc-forensic checkout automatically (a sibling
-directory named `fc-forensic` or `stack-forensic`) or via the
-`STACK_FORENSIC_DIR` environment variable. Read-only: it never writes to the
-forensic database. Surfaced in the Setup tab and through the AI's
-`get_forensic_record` / `list_forensic_units` tools.
+- **Config backups** — standard CLI `diff all` text. Download them, diff any
+  two against each other, restore them here, or paste them into any other
+  configurator. Every write batch auto-snapshots one first.
+- **Blackbox logs** — standard `.bbl` / `.bfl` files, straight off your FC's
+  flash or SD card.
+- **Firmware** — official Betaflight release hexes fetched for your board
+  target, or any local Intel HEX file.
+- **Build plans** *(optional)* — import a build-plan JSON
+  ([documented schema](docs/loadout-schema.md), write it by hand or export
+  it from your planning tool of choice) in the Checklists tab: you get a
+  kit-check stage, the right checklist set auto-selected, and one-click
+  **as-built verification** — planned board target / firmware / motor count
+  vs. what the bench actually reports. The AI reads it via `get_loadout`.
+- **Hardware spec catalog** *(optional)* — point `COTS_CATALOG_PATH` at a
+  local parts-spec JSON catalog (or download a copy once via
+  `POST /api/catalog/fetch`) and the AI gains hardware lookups
+  (`search_catalog`). Without one, the tool degrades gracefully.
+- **Bench case history** *(optional)* — point `STACK_FORENSIC_DIR` at a
+  local case-history database directory (or keep one in a sibling folder)
+  and the Setup tab shows every board's prior scans, verdicts, and linked
+  ESC records the moment you plug it in. Strictly read-only.
 
 ## Firmware flashing prerequisites
 
@@ -251,7 +238,7 @@ override. The system prompt lives at `llm/prompts/system.md` and is editable.
 
 Sageflight doubles as an MCP server: any MCP-aware agent (Claude Code, etc.)
 can inspect the bench — detection, scans, live telemetry with decoded
-arming flags, config diffs, test history, forensic records, the planned
+arming flags, config diffs, test history, case-history records, the planned
 loadout. **Read-only by design**: actuation stays behind the human-confirmed
 UI, exactly like the in-app AI.
 
@@ -291,7 +278,7 @@ cd app && npm start            # serve built app + API on :3001
 ```
 
 Tests cover MSP v1 framing, BLHeli 4-way CRC/framing, ESC EEPROM string
-parsing, Intel HEX parsing, dfu-util output parsing, forensic-DB lookups,
+parsing, Intel HEX parsing, dfu-util output parsing, case-history lookups,
 CLI command classification, USB port classification, and the backup/history
 store. CI runs them plus the frontend build on every push.
 
@@ -304,7 +291,7 @@ Local runtime data (config backups, staged firmware, test history) lives in
 - [x] Tool-use loop: LLM calls detect/scan/config/history tools
 - [x] Guided build checklists per airframe class
 - [x] Firmware-safe flash wrapper (backup before flash, verify after, restore)
-- [x] Integration with `stack-forensic` DB — forensic records as context
+- [x] Case-history DB integration — per-board bench records as context (read-only)
 - [x] ESC interrogation UI via BLHeli 4-way passthrough
 - [x] AI config proposals with human approve (propose → review → apply)
 - [x] Electron desktop shell
@@ -323,7 +310,7 @@ Local runtime data (config backups, staged firmware, test history) lives in
 - [ ] Blackbox v2c — validation across a corpus of real logs (needs bench
       time and real .bbl files)
 - [x] Parity wave 2: Ports editor + Presets browser (official BF repo)
-- [x] cots-catalog integration — hardware specs for the AI (search_catalog)
+- [x] Hardware spec catalog — parts lookups for the AI (search_catalog)
 - [x] Parity wave 3: OSD editor, power & battery calibration, auto pre-write
       snapshots + config timeline diffing
 - [x] VTX tables editor — full Betaflight-configurator tab parity reached

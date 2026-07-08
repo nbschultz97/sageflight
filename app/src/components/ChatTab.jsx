@@ -241,7 +241,7 @@ export default function ChatTab() {
           checked={agentMode}
           onChange={setAgentMode}
           label="Tools"
-          hint="Let the LLM inspect the aircraft (detect, scan, config, history, forensic DB) and propose config changes you approve. It can never actuate hardware itself."
+          hint="Let the LLM inspect the aircraft (detect, scan, config, test + case history) and propose config changes you approve. It can never actuate hardware itself."
         />
         <Toggle
           checked={includeContext && hasScan}
@@ -263,7 +263,7 @@ export default function ChatTab() {
               <li>"my quad won't arm, what do I check?"</li>
               <li>"scan my FC and tell me if anything looks wrong" <span className="pill-muted ml-1">Tools on</span></li>
               <li>"set me up for DSHOT600 with bidirectional dshot" <span className="pill-muted ml-1">proposes changes</span></li>
-              <li>"what's the forensic history on this board?"</li>
+              <li>"what's the case history on this board?"</li>
             </ul>
           </div>
         )}

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240">
+  <title>Sageflight — attitude indicator with sage-leaf aircraft symbol</title>
+  <defs>
+    <linearGradient id="leafg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b3d3a2"/>
+      <stop offset="1" stop-color="#6f8f60"/>
+    </linearGradient>
+    <clipPath id="dial">
+      <circle cx="120" cy="120" r="82"/>
+    </clipPath>
+  </defs>
+
+  <!-- badge background -->
+  <rect width="240" height="240" rx="48" fill="#0e1210"/>
+
+  <!-- tilted horizon inside the dial -->
+  <g clip-path="url(#dial)">
+    <g transform="rotate(-10 120 120)">
+      <rect x="20" y="120" width="200" height="110" fill="#9dc08b" opacity="0.09"/>
+      <line x1="28" y1="120" x2="212" y2="120" stroke="#6f8f60" stroke-width="3"/>
+    </g>
+  </g>
+
+  <!-- instrument ring -->
+  <circle cx="120" cy="120" r="86" fill="none" stroke="#9dc08b" stroke-width="6"/>
+  <!-- sky pointer -->
+  <path d="M120 40 L111 54 L129 54 Z" fill="#e0b458"/>
+
+  <!-- fixed aircraft wing bars -->
+  <line x1="58" y1="120" x2="86" y2="120" stroke="#e0b458" stroke-width="6" stroke-linecap="round"/>
+  <line x1="154" y1="120" x2="182" y2="120" stroke="#e0b458" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- sage leaf as the aircraft symbol -->
+  <path d="M120 58 C150 88 152 130 120 176 C88 130 90 88 120 58 Z" fill="url(#leafg)"/>
+  <path d="M120 72 L120 164" stroke="#0e1210" stroke-width="3" stroke-linecap="round"/>
+  <path d="M120 100 C129 104 135 111 139 120" stroke="#0e1210" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M120 100 C111 104 105 111 101 120" stroke="#0e1210" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M120 128 C128 131 133 137 136 144" stroke="#0e1210" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M120 128 C112 131 107 137 104 144" stroke="#0e1210" stroke-width="2" fill="none" stroke-linecap="round"/>
+</svg>

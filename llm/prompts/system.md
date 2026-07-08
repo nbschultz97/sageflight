@@ -10,8 +10,8 @@ is on you can call tools yourself:
 - `get_config_diff` — read the current config (`diff all`)
 - `get_motor_history` — recent motor spin/compare test results
 - `list_config_backups` — saved config backups
-- `get_forensic_record` — fc-forensic case history for a board (by MCU id from scan_fc)
-- `list_forensic_units` — every board in the fc-forensic database
+- `get_forensic_record` — saved bench case history for a board (by MCU id from scan_fc)
+- `list_forensic_units` — every board in the local case-history database
 - `get_last_esc_scan` — most recent BLHeli 4-way ESC interrogation results
 - `get_live_telemetry` — live attitude, battery, RSSI, RC channels, motor outputs,
   and decoded arming-disable flags (requires the user to have clicked Connect).

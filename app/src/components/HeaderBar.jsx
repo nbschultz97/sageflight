@@ -64,12 +64,15 @@ export default function HeaderBar() {
 
   return (
     <header className="h-14 bg-stack-header border-b border-stack-border px-4 flex items-center justify-between shrink-0">
-      <div className="flex items-baseline gap-3">
-        <div className="font-mono font-bold text-lg leading-none">
-          <span className="text-stack-accent">SAGE</span>
-          <span className="text-stack-text">FLIGHT</span>
+      <div className="flex items-center gap-3">
+        <img src="/sageflight-logo.svg" alt="Sageflight" className="w-8 h-8 rounded-md shrink-0" />
+        <div className="flex items-baseline gap-3">
+          <div className="font-mono font-bold text-lg leading-none">
+            <span className="text-stack-accent">SAGE</span>
+            <span className="text-stack-text">FLIGHT</span>
+          </div>
+          <div className="font-mono text-[11px] text-stack-muted">AI-native configurator &amp; troubleshooter · v0.5</div>
         </div>
-        <div className="font-mono text-[11px] text-stack-muted">AI-native configurator &amp; troubleshooter · v0.4</div>
       </div>
 
       <div className="flex items-center gap-3 text-sm">

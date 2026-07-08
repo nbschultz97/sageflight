@@ -31,7 +31,7 @@ export default function DetectTab() {
       setScan(j);
       // Persist for the Chat tab's "FC context" toggle.
       try { localStorage.setItem('st:lastScan', JSON.stringify({ at: new Date().toISOString(), fc: j.fc })); } catch {}
-      // Cross-reference the fc-forensic database by MCU id.
+      // Cross-reference the local case-history database by MCU id.
       setForensicMatch(null);
       if (j.fc?.mcuId && j.fc.mcuId !== 'UNKNOWN') {
         try {
@@ -52,7 +52,7 @@ export default function DetectTab() {
     <div className="max-w-4xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Setup</h1>
-        <p className="text-stack-muted mt-1">Plug in your flight controller and hit <span className="text-stack-accent font-semibold">Connect</span> for live telemetry. Scan reads board identity, firmware, sensors, and health via Betaflight CLI — and cross-references the fc-forensic case history for this exact board.</p>
+        <p className="text-stack-muted mt-1">Plug in your flight controller and hit <span className="text-stack-accent font-semibold">Connect</span> for live telemetry. Scan reads board identity, firmware, sensors, and health via Betaflight CLI — and pulls up the saved case history for this exact board.</p>
       </div>
 
       <LivePanel />
@@ -226,8 +226,8 @@ function ForensicPanel({ match }) {
   if (!rec) {
     return (
       <section className="panel p-4 text-sm text-stack-muted">
-        <span className="text-xs uppercase tracking-wide mr-2">Forensic history</span>
-        No fc-forensic record for this board — it has never been through a forensic scan.
+        <span className="text-xs uppercase tracking-wide mr-2">Case history</span>
+        No saved record for this board — it hasn't been through a bench scan before.
       </section>
     );
   }
@@ -235,7 +235,7 @@ function ForensicPanel({ match }) {
   return (
     <section className="panel p-5">
       <div className="flex items-center gap-3 mb-3">
-        <div className="text-xs uppercase tracking-wide text-stack-muted">Forensic history match</div>
+        <div className="text-xs uppercase tracking-wide text-stack-muted">Case history match</div>
         <span className={u.status === 'DEAD' ? 'pill-err' : u.status === 'HEALTHY' ? 'pill-ok' : 'pill-warn'}>
           {u.status || 'UNKNOWN'}
         </span>
@@ -243,7 +243,7 @@ function ForensicPanel({ match }) {
       <div className="grid md:grid-cols-2 gap-x-8 gap-y-1 text-sm">
         <Info k="Unit" v={`#${u.unitNumber ?? '?'} · ${u.label || 'unlabeled'}`} />
         <Info k="Batch" v={rec.batch} />
-        <Info k="Forensic scans" v={`${u.scanCount}${u.lastScanAt ? ` · last ${u.lastScanAt.slice(0, 10)}` : ''}`} />
+        <Info k="Bench scans" v={`${u.scanCount}${u.lastScanAt ? ` · last ${u.lastScanAt.slice(0, 10)}` : ''}`} />
         {u.notes && <Info k="Notes" v={u.notes} />}
       </div>
       {rec.linkedEscs?.length > 0 && (

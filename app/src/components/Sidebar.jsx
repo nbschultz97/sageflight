@@ -28,9 +28,12 @@ export default function Sidebar({ tabs, active, onSelect }) {
           </button>
         ))}
       </nav>
-      <div className="p-3 border-t border-stack-border text-xs text-stack-muted font-mono">
-        <div>active companion to</div>
-        <div className="text-stack-text">stack-forensic</div>
+      <div className="p-3 border-t border-stack-border text-xs text-stack-muted font-mono flex items-center gap-2">
+        <img src="/sageflight-logo.svg" alt="" className="w-6 h-6 rounded opacity-80" />
+        <div>
+          <div>offline-first</div>
+          <div className="text-stack-text">no cloud · no data exfil</div>
+        </div>
       </div>
     </aside>
   );

@@ -197,8 +197,8 @@ function ChecklistSection({ section, done, toggle }) {
   );
 }
 
-// Optional COTS-Architect bridge: import a planned build to get a kit-check
-// stage and as-built verification. Sageflight works fully without one.
+// Optional build-plan import (documented JSON schema in docs/loadout-schema.md):
+// gives a kit-check stage and as-built verification. Fully optional.
 function LoadoutPanel({ loadout, setLoadout }) {
   const [error, setError] = useState(null);
   const [verify, setVerify] = useState(null);
@@ -250,7 +250,7 @@ function LoadoutPanel({ loadout, setLoadout }) {
       {!loadout ? (
         <div className="flex items-center justify-between text-sm">
           <div className="text-stack-muted">
-            Planned this build in COTS-Architect? Import its loadout JSON for a kit-check stage and
+            Have a build plan? Import a loadout JSON (see docs/loadout-schema.md) for a kit-check stage and
             as-built verification. <span className="text-stack-text">Optional</span> — everything here works without it.
           </div>
           <button className="btn-ghost text-sm shrink-0 ml-3" onClick={() => fileRef.current?.click()}>

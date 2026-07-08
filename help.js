@@ -8,7 +8,7 @@ const sections = [
     body: [
       '  cd app && npm install && npm run dev    then open http://localhost:5173',
       '',
-      '  Betaflight-style UI. Tabs: Setup (USB + FC scan + forensic history),',
+      '  Betaflight-style UI. Tabs: Setup (USB + FC scan + case history),',
       '  Motors (safety-gated spin tests, voltage-sag comparison), ESC (BLHeli',
       '  4-way interrogation), Config/CLI (backups, console, restore), Checklists,',
       '  AI Assistant (offline LLM with tools + human-approved config proposals),',
@@ -44,15 +44,15 @@ const sections = [
     ],
   },
   {
-    title: 'RELATION TO STACK-FORENSIC',
+    title: 'IMPORT & EXPORT',
     body: [
-      '  Sageflight is the ACTIVE companion to the READ-ONLY stack-forensic tool.',
-      '  - stack-forensic: scans, fingerprints, diagnoses (no actuation)',
-      '  - sageflight (this): spins motors, writes configs, flashes firmware,',
-      '    guided build assist — and reads the forensic DB for board history',
-      '',
-      '  Shared protocol libraries (lib/msp.js, lib/blheli-4way.js, lib/betaflight-cli.js)',
-      '  are duplicated across both tools for now. May factor into a shared npm package later.',
+      '  Everything is plain, portable files - no lock-in, no required companions:',
+      '  - Config backups: standard CLI `diff all` text (download / diff / restore)',
+      '  - Blackbox logs: standard .bbl / .bfl files',
+      '  - Firmware: official release hexes or any local Intel HEX',
+      '  - Optional: build-plan JSON (docs/loadout-schema.md), hardware spec',
+      '    catalog (COTS_CATALOG_PATH), and a local case-history database',
+      '    (STACK_FORENSIC_DIR, read-only) for per-board bench records',
     ],
   },
   {
