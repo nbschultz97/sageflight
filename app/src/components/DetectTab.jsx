@@ -99,9 +99,11 @@ export default function DetectTab() {
   );
 }
 
+const VARIANT_NAMES = { BTFL: 'Betaflight', INAV: 'INAV', EMUF: 'EmuFlight', CLFL: 'Cleanflight' };
+
 // Live attitude + vitals while connected — the "is it alive" view.
 function LivePanel() {
-  const { connected, telemetry } = useTelemetry();
+  const { connected, telemetry, variant } = useTelemetry();
   if (!connected || !telemetry) return null;
   const att = telemetry.attitude;
   const an = telemetry.analog;
@@ -110,7 +112,10 @@ function LivePanel() {
   return (
     <section className="panel p-5">
       <div className="flex items-center justify-between mb-4">
-        <div className="text-xs uppercase tracking-wide text-stack-muted">Live</div>
+        <div className="flex items-center gap-2">
+          <div className="text-xs uppercase tracking-wide text-stack-muted">Live</div>
+          {variant && <span className="pill-muted">{VARIANT_NAMES[variant] || variant}</span>}
+        </div>
         {st?.armed
           ? <span className="pill-err">ARMED</span>
           : <span className="pill-ok">disarmed</span>}
@@ -131,7 +136,7 @@ function LivePanel() {
         </div>
       </div>
 
-      <ArmingDoctor status={st} />
+      <ArmingDoctor status={st} variant={variant} />
     </section>
   );
 }
@@ -139,9 +144,21 @@ function LivePanel() {
 // The #1 beginner question, answered live: every active arming-disable flag
 // with a plain-English fix. (BF Configurator shows the flag names; we say
 // what to actually do.)
-function ArmingDoctor({ status }) {
+function ArmingDoctor({ status, variant }) {
   const flags = status?.armingDisable || [];
   if (status?.armed || flags.length === 0) return null;
+  // The decode table is calibrated for Betaflight bit ordering. On other
+  // firmware, show the raw bitmask instead of confidently-wrong advice.
+  if (variant && variant !== 'BTFL') {
+    return (
+      <div className="mt-5 pt-4 border-t border-stack-border text-sm text-stack-muted">
+        <span className="text-stack-text">Arming blocked</span> (raw flags:{' '}
+        <span className="font-mono">0x{(status.armingDisableBits || 0).toString(16)}</span>).
+        Flag decoding is calibrated for Betaflight — on {VARIANT_NAMES[variant] || variant}, run{' '}
+        <span className="font-mono">status</span> in the CLI for the flag names.
+      </div>
+    );
+  }
   // MSP is always set while we're connected over USB — call it out gently
   // instead of alarming the user.
   const mspOnly = flags.length === 1 && flags[0].name === 'MSP';
@@ -274,7 +291,7 @@ function FcReadout({ fc }) {
               <Row k="MCU ID" v={fc.mcuId} mono />
               <Row k="Board" v={fc.boardName} />
               <Row k="Manufacturer" v={fc.manufacturerId} />
-              <Row k="Firmware" v={fc.firmware ? `Betaflight ${fc.firmware}` : null} />
+              <Row k="Firmware" v={fc.firmware ? `${fc.fwVariant || 'Betaflight'} ${fc.firmware}` : null} />
               <Row k="Build Key" v={fc.buildKey} mono />
               <Row k="MCU Type" v={fc.mcuType} />
               <Row k="Clock" v={fc.clock} />

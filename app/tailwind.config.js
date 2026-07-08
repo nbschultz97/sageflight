@@ -1,22 +1,22 @@
 /** @type {import('tailwindcss').Config} */
-// Palette modeled on Betaflight Configurator's dark theme: charcoal surfaces,
-// BF-yellow accent, dark-on-yellow primary buttons.
+// Sageflight's own palette: sage green accent on green-cast charcoal.
+// Familiar configurator layout, unmistakably not Betaflight yellow.
 export default {
   content: ['./index.html', './src/**/*.{js,jsx,ts,tsx}'],
   theme: {
     extend: {
       colors: {
         stack: {
-          bg:     '#2e2e2e',
-          panel:  '#3b3b3b',
-          header: '#1b1b1b',
-          border: '#4a4a4a',
-          text:   '#e0e0e0',
-          muted:  '#9e9e9e',
-          accent: '#ffbb00',
-          ok:     '#7ec43b',
-          warn:   '#ff9800',
-          err:    '#f0392e',
+          bg:     '#262b25',
+          panel:  '#30362f',
+          header: '#181b17',
+          border: '#454d43',
+          text:   '#e3e7df',
+          muted:  '#9aa294',
+          accent: '#a3c17e',
+          ok:     '#79c26d',
+          warn:   '#e0b13f',
+          err:    '#e05d52',
         },
       },
       fontFamily: {

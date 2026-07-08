@@ -452,19 +452,28 @@ app.post('/api/flash/upload', express.text({ limit: '32mb', type: () => true }),
   }
 });
 
-// Betaflight releases (online, optional). Cached so repeat opens are instant;
-// fails soft when offline — the Flash tab falls back to local .hex upload.
-let releasesCache = { at: 0, data: null };
-app.get('/api/flash/releases', async (_req, res) => {
+// Firmware releases (online, optional). Sources: Betaflight and INAV GitHub
+// releases. Cached per source; fails soft when offline — the Flash tab falls
+// back to local .hex upload.
+const RELEASE_SOURCES = {
+  betaflight: 'betaflight/betaflight',
+  inav: 'iNavFlight/inav',
+};
+const releasesCache = {}; // src -> { at, data }
+app.get('/api/flash/releases', async (req, res) => {
+  const src = String(req.query.src || 'betaflight').toLowerCase();
+  const repo = RELEASE_SOURCES[src];
+  if (!repo) return res.status(400).json({ ok: false, error: `unknown source: ${src}` });
   try {
-    if (!releasesCache.data || Date.now() - releasesCache.at > 10 * 60 * 1000) {
-      const r = await fetch('https://api.github.com/repos/betaflight/betaflight/releases?per_page=6', {
+    const cached = releasesCache[src];
+    if (!cached || Date.now() - cached.at > 10 * 60 * 1000) {
+      const r = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=6`, {
         headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'sageflight' },
         signal: AbortSignal.timeout(8000),
       });
       if (!r.ok) throw new Error(`GitHub API: ${r.status}`);
       const raw = await r.json();
-      releasesCache = {
+      releasesCache[src] = {
         at: Date.now(),
         data: raw.filter(rel => !rel.draft).map(rel => ({
           tag: rel.tag_name,
@@ -476,18 +485,18 @@ app.get('/api/flash/releases', async (_req, res) => {
         })),
       };
     }
-    res.json({ ok: true, online: true, releases: releasesCache.data });
+    res.json({ ok: true, online: true, source: src, releases: releasesCache[src].data });
   } catch (e) {
-    res.json({ ok: true, online: false, error: e.message, releases: [] });
+    res.json({ ok: true, online: false, source: src, error: e.message, releases: [] });
   }
 });
 
-// Download a release asset server-side and stage it. Locked to Betaflight's
-// GitHub releases so this can't be used to fetch arbitrary URLs.
+// Download a release asset server-side and stage it. Locked to official
+// Betaflight/INAV GitHub releases so this can't fetch arbitrary URLs.
 app.post('/api/flash/fetch', async (req, res) => {
   const { url, name } = req.body || {};
-  if (!/^https:\/\/github\.com\/betaflight\/betaflight\/releases\/download\//.test(String(url))) {
-    return res.status(400).json({ ok: false, error: 'only official Betaflight release assets can be fetched' });
+  if (!/^https:\/\/github\.com\/(betaflight\/betaflight|iNavFlight\/inav)\/releases\/download\//.test(String(url))) {
+    return res.status(400).json({ ok: false, error: 'only official Betaflight/INAV release assets can be fetched' });
   }
   try {
     const r = await fetch(url, { signal: AbortSignal.timeout(60000) });

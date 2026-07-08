@@ -48,7 +48,7 @@ async function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
     height: 840,
-    backgroundColor: '#2e2e2e',
+    backgroundColor: '#262b25',
     title: 'Sageflight',
     autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false },

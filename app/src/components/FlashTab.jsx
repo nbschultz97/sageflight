@@ -38,10 +38,15 @@ export default function FlashTab() {
     } catch {}
   }
 
+  const [releaseSrc, setReleaseSrc] = useState('betaflight');
+
+  useEffect(() => { refresh(); }, []);
+
   useEffect(() => {
-    refresh();
-    fetch('/api/flash/releases').then(r => r.json()).then(setReleases).catch(() => setReleases({ online: false, releases: [] }));
-  }, []);
+    setReleases(null);
+    fetch(`/api/flash/releases?src=${releaseSrc}`).then(r => r.json()).then(setReleases)
+      .catch(() => setReleases({ online: false, releases: [] }));
+  }, [releaseSrc]);
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -240,9 +245,19 @@ export default function FlashTab() {
           <div className="text-sm text-stack-muted">Run a scan in Setup to get a board-matched firmware recommendation.</div>
         )}
 
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-stack-muted">Firmware source:</span>
+          {['betaflight', 'inav'].map(s => (
+            <button key={s} onClick={() => setReleaseSrc(s)}
+              className={releaseSrc === s ? 'pill-ok' : 'pill-muted hover:text-stack-text'}>
+              {s === 'betaflight' ? 'Betaflight' : 'INAV'}
+            </button>
+          ))}
+        </div>
+
         {recommendedAssets.length > 0 && (
           <div>
-            <div className="text-xs text-stack-muted mb-2">Official Betaflight releases for your board:</div>
+            <div className="text-xs text-stack-muted mb-2">Official {releaseSrc === 'inav' ? 'INAV' : 'Betaflight'} releases for your board:</div>
             <div className="space-y-1.5">
               {recommendedAssets.map(a => (
                 <div key={a.url} className="flex items-center justify-between bg-stack-bg border border-stack-border rounded px-3 py-2 text-sm">

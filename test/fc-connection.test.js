@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseAttitude, parseAnalog, parseRc, parseMotor, parseStatus } = require('../lib/fc-connection');
+const { parseAttitude, parseAnalog, parseRc, parseMotor, parseStatus, parseVariant } = require('../lib/fc-connection');
 
 function i16(...vals) {
   const b = Buffer.alloc(vals.length * 2);
@@ -48,6 +48,13 @@ test('parseMotor reads up to 8 outputs', () => {
   const m = parseMotor(i16(1000, 1100, 1200, 1300, 0, 0, 0, 0));
   assert.equal(m.motors.length, 8);
   assert.equal(m.motors[3], 1300);
+});
+
+test('parseVariant decodes the 4-char firmware id', () => {
+  assert.equal(parseVariant(Buffer.from('BTFL')), 'BTFL');
+  assert.equal(parseVariant(Buffer.from('INAV')), 'INAV');
+  assert.equal(parseVariant(Buffer.from('ab')), null);
+  assert.equal(parseVariant(null), null);
 });
 
 test('parseStatus decodes cycle time, i2c errors, and armed flag', () => {

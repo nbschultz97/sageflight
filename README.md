@@ -48,6 +48,28 @@ Sageflight targets the pain points the existing toolchain leaves open:
 - **A knowledgeable bench partner** — every setting, failure mode, and next
   step explainable in plain English, offline.
 
+## Compatibility
+
+| | Betaflight | INAV | EmuFlight | ArduPilot / PX4 | KISS |
+|---|---|---|---|---|---|
+| Detect / identify | ✅ | ✅ | ✅ | USB detect only | — |
+| Live telemetry (MSP) | ✅ | ✅ | ✅ | — (MAVLink, roadmap) | — |
+| Arming doctor (decoded fixes) | ✅ | raw flags only | raw flags only | — | — |
+| CLI console / backup / restore | ✅ | ✅ | ✅ | — | — |
+| Motor tests | ✅ | ✅* | ✅* | — | — |
+| ESC 4-way interrogation | ✅ | ✅ | ✅ | — | — |
+| Firmware flashing (DFU) | ✅ + release fetch | ✅ + release fetch | local .hex | — | — |
+| AI assistant / proposals | ✅ | ✅ (CLI syntax differs — review carefully) | ✅ | advice only | advice only |
+
+*CLI `motor` command compatible; bench-verified on Betaflight only so far.
+
+Hardware: any STM32 / AT32 / APM32 flight controller (native VCP or CP210x /
+FTDI / CH340 UART bridges), STM32-style DFU bootloaders for flashing, and
+BLHeli_S / BLHeli_32 / AM32 / Bluejay / JESC ESCs for interrogation.
+
+ArduPilot/PX4 support means a MAVLink stack — it's on the roadmap as its own
+milestone, not a checkbox.
+
 ## Quick start
 
 ```bash
@@ -214,7 +236,8 @@ Local runtime data (config backups, staged firmware, test history) lives in
 - [ ] Config timeline — auto-snapshot every change, "what changed since last
       session?" diffing across your fleet
 - [ ] Packaged installers (electron-builder)
-- [ ] INAV / ArduPilot support
+- [ ] INAV-calibrated arming flags + INAV-aware AI prompts
+- [ ] ArduPilot / PX4 via MAVLink (own milestone: connection, params, arming checks)
 
 ## License
 
