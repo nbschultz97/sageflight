@@ -30,6 +30,33 @@ test('validateLoadout rejects bad shapes with specific errors', () => {
   assert.equal(badQty.ok, false);
 });
 
+test('validateLoadout accepts v1.1 optional blocks (tune, payload_g)', () => {
+  const v = validateLoadout({
+    ...GOOD,
+    payload_g: 250,
+    tune: {
+      tuneVersion: 1,
+      format: 'betaflight-cli',
+      rates: { rates_type: 'betaflight', roll_rc_rate: 100, roll_srate: 70, roll_expo: 30 },
+    },
+  });
+  assert.equal(v.ok, true);
+  assert.deepEqual(v.errors, []);
+  assert.deepEqual(v.warnings, []);
+});
+
+test('malformed tune/payload warn but never reject', () => {
+  const v = validateLoadout({
+    ...GOOD,
+    payload_g: -5,
+    tune: { tuneVersion: 2, rates: { roll_rc_rate: 'fast' } },
+  });
+  assert.equal(v.ok, true, 'tune problems must not reject a loadout');
+  assert.ok(v.warnings.some(w => /payload_g/.test(w)));
+  assert.ok(v.warnings.some(w => /tuneVersion/.test(w)));
+  assert.ok(v.warnings.some(w => /roll_rc_rate/.test(w)));
+});
+
 test('summarizeLoadout pulls the bench-relevant facts', () => {
   const s = summarizeLoadout(GOOD);
   assert.equal(s.motorCount, 4);
