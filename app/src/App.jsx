@@ -6,7 +6,9 @@ import StatusBar from './components/StatusBar';
 import DetectTab from './components/DetectTab';
 import ReceiverTab from './components/ReceiverTab';
 import ModesTab from './components/ModesTab';
+import PortsTab from './components/PortsTab';
 import TuneTab from './components/TuneTab';
+import PresetsTab from './components/PresetsTab';
 import SensorsTab from './components/SensorsTab';
 import MotorsTab from './components/MotorsTab';
 import EscTab from './components/EscTab';
@@ -20,7 +22,9 @@ const TABS = [
   { id: 'detect',     label: 'Setup',            icon: 'setup' },
   { id: 'receiver',   label: 'Receiver',         icon: 'receiver' },
   { id: 'modes',      label: 'Modes',            icon: 'modes' },
+  { id: 'ports',      label: 'Ports',            icon: 'ports' },
   { id: 'tune',       label: 'Tune',             icon: 'tune' },
+  { id: 'presets',    label: 'Presets',          icon: 'presets' },
   { id: 'sensors',    label: 'Sensors',          icon: 'sensors' },
   { id: 'motors',     label: 'Motors',           icon: 'motors' },
   { id: 'esc',        label: 'ESC',              icon: 'esc' },
@@ -45,7 +49,9 @@ export default function App() {
             {tab === 'detect'     && <DetectTab />}
             {tab === 'receiver'   && <ReceiverTab />}
             {tab === 'modes'      && <ModesTab />}
+            {tab === 'ports'      && <PortsTab />}
             {tab === 'tune'       && <TuneTab />}
+            {tab === 'presets'    && <PresetsTab />}
             {tab === 'sensors'    && <SensorsTab />}
             {tab === 'motors'     && <MotorsTab />}
             {tab === 'esc'        && <EscTab />}

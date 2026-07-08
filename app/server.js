@@ -26,7 +26,9 @@ const { interrogateAll } = require('../lib/esc-4way');
 const { parseIntelHex } = require('../lib/intel-hex');
 const { findDfuUtil, listDfuDevices, enterDfu, flashWithDfuUtil } = require('../lib/flash');
 const { createConnection, mspOneShot, CMD: MSP_CMD } = require('../lib/fc-connection');
-const { parseSetLines, extractTune, parseAuxLines } = require('../lib/cli-parsers');
+const { parseSetLines, extractTune, parseAuxLines, parseSerialLines } = require('../lib/cli-parsers');
+const catalog = require('../lib/catalog');
+const presets = require('../lib/presets');
 
 const VERSION = '0.4.0';
 
@@ -804,6 +806,80 @@ app.post('/api/tune/review', async (req, res) => {
   }
 });
 
+// ---------- Ports (UART function assignment) ----------
+app.get('/api/ports/config', async (_req, res) => {
+  const det = await detectFC();
+  if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: `no FC on USB (${det.type})` });
+  try {
+    const out = await serialOp(() => withCli(det.comPort, async ({ send }) => send('serial', 2000)));
+    res.json({ ok: true, ports: parseSerialLines(out) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ---------- cots-catalog (hardware spec lookups, read-only) ----------
+app.get('/api/catalog/status', (_req, res) => {
+  res.json({ ok: true, ...catalog.catalogStatus() });
+});
+
+app.post('/api/catalog/fetch', async (_req, res) => {
+  try {
+    const saved = await catalog.fetchCatalog();
+    res.json({ ok: true, saved, ...catalog.catalogStatus() });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/catalog/search', (req, res) => {
+  const { catalog: cat } = catalog.loadCatalog();
+  if (!cat) return res.json({ ok: true, available: false, results: [] });
+  res.json({ ok: true, available: true, results: catalog.searchParts(cat, req.query.q || '', 8) });
+});
+
+// ---------- Betaflight community presets ----------
+let presetsIndexCache = { at: 0, data: null };
+
+async function getPresetsIndex() {
+  if (!presetsIndexCache.data || Date.now() - presetsIndexCache.at > 30 * 60 * 1000) {
+    const r = await fetch(presets.INDEX_URL, { signal: AbortSignal.timeout(20000) });
+    if (!r.ok) throw new Error(`presets index: ${r.status}`);
+    presetsIndexCache = { at: Date.now(), data: await r.json() };
+  }
+  return presetsIndexCache.data;
+}
+
+app.get('/api/presets', async (req, res) => {
+  try {
+    const index = await getPresetsIndex();
+    const results = presets.filterIndex(index, {
+      query: req.query.q || '',
+      category: req.query.category || '',
+      firmware: req.query.firmware || '',
+    }).slice(0, 60);
+    res.json({ ok: true, online: true, results });
+  } catch (e) {
+    res.json({ ok: true, online: false, error: e.message, results: [] });
+  }
+});
+
+app.get('/api/presets/file', async (req, res) => {
+  const p = String(req.query.path || '');
+  if (!/^[\w\-./]+\.txt$/.test(p) || p.includes('..')) {
+    return res.status(400).json({ ok: false, error: 'invalid preset path' });
+  }
+  try {
+    const r = await fetch(presets.RAW_BASE + p, { signal: AbortSignal.timeout(20000) });
+    if (!r.ok) throw new Error(`preset fetch: ${r.status}`);
+    const text = await r.text();
+    const parsed = presets.parsePreset(text);
+    res.json({ ok: true, path: p, raw: text, ...parsed });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ---------- Modes (aux switch ranges) ----------
 app.get('/api/modes', async (_req, res) => {
   const det = await detectFC();
@@ -1119,6 +1195,10 @@ const execTool = createToolExecutor({
   forensic,
   connection: conn,
   searchDocs,
+  searchCatalog: (query) => {
+    const { catalog: cat } = catalog.loadCatalog();
+    return cat ? catalog.searchParts(cat, query, 5) : null;
+  },
 });
 
 const MAX_AGENT_ROUNDS = 6;
@@ -1131,7 +1211,7 @@ app.post('/api/agent/chat', async (req, res) => {
     { role: 'system', content: readSystemPrompt() +
       '\n\nYou have live tools: detect_fc, scan_fc, get_config_diff, get_motor_history, list_config_backups,' +
       ' get_forensic_record, list_forensic_units, get_last_esc_scan, get_live_telemetry, get_loadout,' +
-      ' search_docs, propose_config_changes.' +
+      ' search_docs, search_catalog, propose_config_changes.' +
       ' Use them to look at the aircraft instead of asking the user for information a tool can fetch.' +
       ' For "why won\'t it arm" questions, call get_live_telemetry first — it decodes the arming-disable flags.' +
       ' Before answering questions about CLI settings, features, or procedures, call search_docs and ground your answer in what it returns.' +

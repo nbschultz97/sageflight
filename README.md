@@ -99,9 +99,14 @@ npm start
   map, and link health before you ever arm.
 - **Modes** — aux switch range editor with live switch-position markers:
   flip a switch and watch the range activate before you save.
+- **Ports** — UART function assignment (MSP, Serial RX, GPS, VTX control,
+  ESC sensor, blackbox…) with Serial-RX exclusivity handled for you.
 - **Tune** — PID / rates / filters / simplified-tuning editor read straight
   off the FC, with AI review of your current and pending values before a
   backup-gated save.
+- **Presets** — the official Betaflight community presets repo: search,
+  filter by your firmware version, review the exact CLI lines and option
+  checkboxes, apply through the same gated write path.
 - **Sensors** — rolling gyro/accel traces (dead axis, offset, vibration
   triage) and one-click accelerometer calibration.
 - **Motors** — live motor output bars while connected, plus safety-gated
@@ -175,6 +180,10 @@ contracts, never runtime dependencies.
   auto-selected, and one-click **as-built verification** — planned board
   target / firmware / motor count / ESC firmware vs. what the bench
   actually reports. The AI reads the plan via `get_loadout`.
+- **cots-catalog → Sageflight**: hardware-spec lookups for the AI
+  (`search_catalog` tool) and API. Sources, in order: `COTS_CATALOG_PATH`,
+  a sibling `cots-catalog` checkout, or a one-time downloaded copy
+  (`POST /api/catalog/fetch`). No catalog → the tool degrades gracefully.
 - **fc-forensic → Sageflight**: see below.
 
 ## stack-forensic integration
@@ -292,8 +301,9 @@ Local runtime data (config backups, staged firmware, test history) lives in
 - [x] MCP server — read-only bench tools for external agents
 - [ ] Blackbox v2 — frame decoding: gyro noise spectra, step response, and
       AI recommendations from actual flight data (the PIDtoolbox successor)
-- [ ] Parity wave 2: Ports editor, Presets (official BF presets repo), OSD
-      editor, VTX tables, Power & battery calibration
+- [x] Parity wave 2: Ports editor + Presets browser (official BF repo)
+- [x] cots-catalog integration — hardware specs for the AI (search_catalog)
+- [ ] Parity wave 3: OSD editor, VTX tables, Power & battery calibration
 - [ ] ESC settings write + flashing (Bluejay/AM32) — esc-configurator parity
 - [ ] Config timeline — auto-snapshot every change, "what changed since last
       session?" diffing across your fleet

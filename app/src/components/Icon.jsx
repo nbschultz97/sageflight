@@ -70,6 +70,20 @@ const PATHS = {
       <circle cx="19" cy="8" r="2" />
     </>
   ),
+  // ports / plug
+  ports: (
+    <>
+      <rect x="7" y="3" width="10" height="8" rx="1" />
+      <path d="M10 3V1M14 3V1M12 11v4M12 15c0 3-2 4-4 4H6M12 15c0 3 2 4 4 4h2" />
+    </>
+  ),
+  // presets / gift box
+  presets: (
+    <>
+      <rect x="4" y="8" width="16" height="12" rx="1" />
+      <path d="M4 12h16M12 8v12M12 8c-4 0-5-5-2-5s2 5 2 5zM12 8c4 0 5-5 2-5s-2 5-2 5z" />
+    </>
+  ),
   // sensors / waveform
   sensors: (
     <>
