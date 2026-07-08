@@ -1,0 +1,55 @@
+name: Release
+
+# Build installers on tag push and attach them to the GitHub Release.
+# Installers are built in CI, not on dev machines — Windows Smart App
+# Control blocks locally-built unsigned NSIS stubs, and CI gives every
+# release a clean, reproducible build environment.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            app/package-lock.json
+            desktop/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Install app dependencies
+        run: npm ci
+        working-directory: app
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: app
+
+      - name: Install desktop dependencies
+        run: npm ci
+        working-directory: desktop
+
+      - name: Build Windows installer
+        run: npm run dist -- --publish never
+        working-directory: desktop
+
+      - name: Attach installer to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: desktop/release/Sageflight-Setup-*.exe
