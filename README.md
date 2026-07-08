@@ -53,7 +53,21 @@ BLHeli_S / BLHeli_32 / AM32 / Bluejay / JESC ESCs for interrogation.
 ArduPilot/PX4 support means a MAVLink stack — it's on the roadmap as its own
 milestone, not a checkbox.
 
-## Quick start
+## Download
+
+Grab the Windows installer from
+[**Releases**](https://github.com/nbschultz97/sageflight/releases) —
+`Sageflight-Setup-<version>.exe`. Per-user install, no admin required.
+Windows SmartScreen will warn on first run (the installer is not
+code-signed yet) — click *More info → Run anyway*.
+
+Your data (config backups, test history, staged firmware, docs index) lives
+in `%APPDATA%/Sageflight/data`, and survives updates and uninstalls.
+
+macOS / Linux installers are on the roadmap; both platforms run fine from
+source today.
+
+## Quick start (from source)
 
 ```bash
 git clone https://github.com/nbschultz97/sageflight
@@ -68,7 +82,8 @@ Desktop app (Electron shell):
 ```bash
 cd app && npm run build
 cd ../desktop && npm install
-npm start
+npm start          # run the shell against your checkout
+npm run dist       # build the Windows installer (desktop/release/)
 ```
 
 ## Tabs
@@ -307,17 +322,44 @@ Local runtime data (config backups, staged firmware, test history) lives in
       in measured flight data
 - [x] Blackbox v2b — step-response analysis (rise/overshoot/tracking per
       axis) + throttle-vs-frequency heatmap, in the charts and the AI review
-- [ ] Blackbox v2c — validation across a corpus of real logs (needs bench
-      time and real .bbl files)
 - [x] Parity wave 2: Ports editor + Presets browser (official BF repo)
 - [x] Hardware spec catalog — parts lookups for the AI (search_catalog)
 - [x] Parity wave 3: OSD editor, power & battery calibration, auto pre-write
       snapshots + config timeline diffing
 - [x] VTX tables editor — full Betaflight-configurator tab parity reached
+- [x] Windows installer (electron-builder NSIS) published on Releases
+
+### Next — v1.0 gate (trust)
+
+- [ ] **Bench validation pass** — first full session against real hardware:
+      live telemetry, scan, motor tests, ESC 4-way, DFU flash + restore,
+      real blackbox logs through the v2 decoder. Everything above is
+      spec-derived until this lands; nothing gets called "stable" before it.
+- [ ] Blackbox v2c — validation across a corpus of real logs
+- [x] CI release pipeline — Windows installer built + attached on tag push
+      (GitHub Actions); macOS/Linux targets still to add
+- [ ] Code signing — kill the SmartScreen warning (cert decision/cost)
+- [ ] Auto-update — electron-updater against GitHub Releases
+
+### Next — close the remaining Betaflight gaps (capability)
+
+- [ ] Cloud build support — Betaflight build API: pick target + build
+      options, server-side build, flash the custom hex
+- [ ] Blackbox download from the FC — MSP dataflash read + erase, so the
+      whole tune loop (fly → download → analyze → fix) happens in one tool
+- [ ] GPS + Failsafe tabs — failsafe stage 1/2 editor with plain-English
+      (and AI-explained) consequences; GPS config + live sat status
+- [ ] Motor remap wizard — resource remap via the existing safety-gated
+      spin flow ("which motor just spun? click it")
+- [ ] LED strip + Adjustments tabs; OSD font uploader
 - [ ] ESC settings write + flashing (Bluejay/AM32) — esc-configurator parity
-- [ ] Config timeline — auto-snapshot every change, "what changed since last
-      session?" diffing across your fleet
-- [ ] Packaged installers (electron-builder)
+
+### Next — the AI moat (differentiation)
+
+- [ ] Fleet timeline — case history + config timeline across every board
+      you've ever plugged in: "what changed since it last flew well?"
+- [ ] AI tune coach over time — trend analysis across a craft's logs
+      (noise creeping up = bearings; rising sag = battery aging)
 - [ ] INAV-calibrated arming flags + INAV-aware AI prompts
 - [ ] ArduPilot / PX4 via MAVLink (own milestone: connection, params, arming checks)
 

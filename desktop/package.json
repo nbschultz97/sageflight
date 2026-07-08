@@ -1,13 +1,54 @@
 {
   "name": "sageflight-desktop",
-  "version": "0.4.0",
-  "description": "Electron desktop shell for Sageflight",
+  "version": "0.5.0",
+  "description": "Sageflight desktop app - AI-native FPV configurator & troubleshooter",
+  "author": "Noah Schultz",
   "private": true,
   "main": "main.cjs",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "icon": "node make-icon.cjs",
+    "bundle": "node build-bundle.cjs",
+    "predist": "node build-bundle.cjs",
+    "dist": "electron-builder --win"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "serialport": "^13.0.0"
   },
   "devDependencies": {
-    "electron": "^33.2.0"
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^2.1.8",
+    "sharp": "^0.33.5"
+  },
+  "build": {
+    "appId": "com.sageflight.app",
+    "productName": "Sageflight",
+    "asar": false,
+    "npmRebuild": false,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.cjs",
+      "bundle/**/*",
+      "build/icon.ico"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "dir"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "Sageflight-Setup-${version}.${ext}",
+      "deleteAppDataOnUninstall": false
+    }
   }
 }
