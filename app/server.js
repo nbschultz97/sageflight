@@ -941,8 +941,22 @@ app.post('/api/loadout/verify', (req, res) => {
   res.json({ ok: true, loadout: loadoutLib.summarizeLoadout(loadout), ...result });
 });
 
-// ---------- Blackbox (v1: header/settings analysis + AI tune review) ----------
+// ---------- Blackbox (header/settings + frame-level flight analysis) ----------
 const { parseHeaders, selectTuningSettings } = require('../lib/blackbox-header');
+const { analyzeBuffer, metricsForLlm } = require('../lib/blackbox-analyze');
+
+// Frame-level analysis: gyro noise spectra, motor stats. CPU-bound for a few
+// seconds on big logs; results are computed on demand.
+app.get('/api/blackbox/analyze/:name', (req, res) => {
+  const buf = store.readBlackbox(req.params.name);
+  if (!buf) return res.status(404).json({ ok: false, error: 'log not found' });
+  try {
+    const analysis = analyzeBuffer(buf);
+    res.json({ ok: true, analysis });
+  } catch (e) {
+    res.status(422).json({ ok: false, error: `frame decode failed: ${e.message}` });
+  }
+});
 
 app.post('/api/blackbox/upload', express.raw({ limit: '128mb', type: () => true }), (req, res) => {
   const name = String(req.query.name || 'log.bbl');
@@ -983,19 +997,28 @@ app.post('/api/blackbox/review', async (req, res) => {
   if (!parsed) { sseSend(res, { error: 'could not parse headers' }); return res.end(); }
 
   const tuning = selectTuningSettings(parsed.settings);
+  // Include measured flight data when the frame decoder can read this log.
+  let measured = null;
+  try { measured = metricsForLlm(analyzeBuffer(buf)); } catch {}
+
   const prompt = [
-    'Review this Betaflight tune from a blackbox log header. You are an expert FPV tuner.',
+    'Review this Betaflight tune from a blackbox log. You are an expert FPV tuner.',
     `Firmware: ${parsed.firmware || 'unknown'} · Board: ${parsed.board || 'unknown'} · Craft: ${parsed.craft || 'unnamed'}`,
     '',
     'Tuning state at time of flight (key:value):',
-    JSON.stringify(tuning, null, 1).slice(0, 12000),
+    JSON.stringify(tuning, null, 1).slice(0, 10000),
+    '',
+    measured
+      ? 'MEASURED flight data from decoding the log frames (gyro noise in deg/s, spectral peaks in Hz, motor outputs):\n' +
+        JSON.stringify(measured, null, 1).slice(0, 6000)
+      : 'No frame-level data available for this log (decoder could not read it) — review settings only and say so.',
     '',
     'Give a structured review:',
-    '1. **Filters** — anything unusually low/high or disabled? RPM filter vs bidirectional DShot consistency?',
-    '2. **PIDs & feedforward** — obviously out-of-family values for this class of quad?',
-    '3. **Known-bad combinations** — settings that conflict or are dangerous together.',
-    '4. **Top 3 concrete suggestions** — exact `set x = y` lines, most impactful first.',
-    'Be direct. If everything looks stock/sane, say so. Note that frame-level (noise/step-response) analysis is not included in this review.',
+    '1. **Noise** — interpret the gyro spectral peaks and band RMS: frame resonance (~80-150Hz)? motor noise tracking? Is filtering matched to the measured noise, or is there headroom to reduce filter delay?',
+    '2. **Motors** — imbalance between motor averages (mechanical issue on the high one), saturation percentage.',
+    '3. **Filters & PIDs vs the measurements** — concrete conflicts (e.g. dyn notch range missing a measured peak, RPM filter off with strong motor peaks).',
+    '4. **Top 3 concrete suggestions** — exact `set x = y` lines, most impactful first, justified by the measurements.',
+    'Be direct and cite the measured numbers. If the flight looks clean, say so.',
   ].join('\n');
 
   try {

@@ -6,15 +6,108 @@ import DOMPurify from 'dompurify';
 // log headers, and get an AI tune review. (Frame-level noise / step-response
 // analysis is on the roadmap — this covers the "what should I change?"
 // question PIDtoolbox never answered.)
+const AXIS_COLORS = { roll: '#e05d52', pitch: '#79c26d', yaw: '#6ba3d6' };
+
+function FlightAnalysis({ a }) {
+  return (
+    <div className="mb-4 space-y-4">
+      <div className="flex flex-wrap gap-4 text-xs font-mono text-stack-muted">
+        <span>{a.durationSec}s flight</span>
+        <span>{a.sampleRateHz} Hz log rate</span>
+        <span>{a.frames.toLocaleString()} frames</span>
+        <span className={a.coverage > 0.95 ? 'text-stack-ok' : 'text-stack-warn'}>
+          decode coverage {(a.coverage * 100).toFixed(1)}%
+        </span>
+        {a.logsInFile > 1 && <span>last of {a.logsInFile} flights in file</span>}
+      </div>
+
+      <div>
+        <div className="text-xs uppercase tracking-wide text-stack-muted mb-2">Gyro noise spectrum (deg/s amplitude vs Hz)</div>
+        <SpectrumChart axes={a.gyro} />
+        <div className="mt-2 grid md:grid-cols-3 gap-3 text-xs">
+          {a.gyro.filter(g => g.available).map(g => (
+            <div key={g.axis} className="bg-stack-bg border border-stack-border rounded p-2">
+              <div className="font-semibold mb-1" style={{ color: AXIS_COLORS[g.axis] }}>{g.axis}</div>
+              <div className="text-stack-muted">RMS {g.rmsDegS}°/s</div>
+              {g.peaks.length > 0
+                ? g.peaks.map((p, i) => <div key={i} className="font-mono">peak {p.hz} Hz ×{p.ratioToFloor}</div>)
+                : <div className="text-stack-muted">no dominant peaks</div>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-xs uppercase tracking-wide text-stack-muted mb-2">Motors</div>
+        <div className="grid grid-cols-4 gap-3 text-xs">
+          {a.motors.filter(m => m.available).map(m => (
+            <div key={m.motor} className="bg-stack-bg border border-stack-border rounded p-2 font-mono">
+              <div className="text-stack-muted">M{m.motor}</div>
+              <div>avg {m.avg}</div>
+              <div className="text-stack-muted">{m.min}–{m.max}</div>
+              {m.saturationPct > 1 && <div className="text-stack-warn">sat {m.saturationPct}%</div>}
+            </div>
+          ))}
+        </div>
+        {a.motorImbalance != null && a.motorImbalance > 60 && (
+          <div className="mt-2 text-xs text-stack-warn">
+            Motor average spread {a.motorImbalance} — one corner is working harder (weight balance, bent prop/shaft, or drag).
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SpectrumChart({ axes }) {
+  const W = 800, H = 180;
+  const series = axes.filter(g => g.available && g.spectrum?.length);
+  if (series.length === 0) return null;
+  const maxF = Math.max(...series.map(g => g.spectrum[g.spectrum.length - 1].f));
+  const maxM = Math.max(...series.flatMap(g => g.spectrum.map(p => p.m))) || 1;
+  const x = (f) => (f / maxF) * W;
+  const y = (m) => H - 6 - (Math.sqrt(m / maxM)) * (H - 16); // sqrt scale keeps small peaks visible
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full bg-stack-bg border border-stack-border rounded" preserveAspectRatio="none" style={{ height: 180 }}>
+        {[100, 200, 300, 400, 500].filter(f => f < maxF).map(f => (
+          <g key={f}>
+            <line x1={x(f)} y1="0" x2={x(f)} y2={H} stroke="#454d43" strokeWidth="0.5" />
+            <text x={x(f) + 3} y="12" fill="#9aa294" fontSize="10" fontFamily="monospace">{f}Hz</text>
+          </g>
+        ))}
+        {series.map(g => (
+          <polyline key={g.axis} fill="none" stroke={AXIS_COLORS[g.axis]} strokeWidth="1.3"
+            points={g.spectrum.map(p => `${x(p.f)},${y(p.m)}`).join(' ')} />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
 export default function BlackboxTab() {
   const [logs, setLogs] = useState([]);
   const [selected, setSelected] = useState(null); // { name, firmware, craft, tuning, ... }
   const [uploading, setUploading] = useState(false);
   const [review, setReview] = useState('');
   const [reviewing, setReviewing] = useState(false);
+  const [analysis, setAnalysis] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState(null);
   const [error, setError] = useState(null);
   const fileRef = useRef(null);
   const model = localStorage.getItem('st:chat:model') || 'llama3.1:8b';
+
+  async function analyze(name) {
+    setAnalyzing(true); setAnalysis(null); setAnalysisError(null);
+    try {
+      const j = await (await fetch(`/api/blackbox/analyze/${encodeURIComponent(name)}`)).json();
+      if (!j.ok) throw new Error(j.error || 'analysis failed');
+      setAnalysis(j.analysis);
+    } catch (e) { setAnalysisError(e.message); }
+    finally { setAnalyzing(false); }
+  }
 
   async function refresh() {
     try {
@@ -43,11 +136,12 @@ export default function BlackboxTab() {
   }
 
   async function open(name) {
-    setError(null); setReview('');
+    setError(null); setReview(''); setAnalysis(null); setAnalysisError(null);
     try {
       const j = await (await fetch(`/api/blackbox/logs/${encodeURIComponent(name)}`)).json();
       if (!j.ok) throw new Error(j.error || 'could not read log');
       setSelected({ name, ...j });
+      analyze(name);
     } catch (e) { setError(e.message); }
   }
 
@@ -97,9 +191,9 @@ export default function BlackboxTab() {
       </div>
 
       <div className="note">
-        <span className="font-semibold">v1 scope:</span> header/settings analysis. Frame-level analysis
-        (gyro noise spectra, step response) is on the roadmap — for now pair this with your eyes on
-        Blackbox Explorer for the traces, and let the AI sanity-check the tune itself.
+        <span className="font-semibold">Frame decoder is experimental:</span> gyro spectra and motor
+        stats are decoded straight from the log's binary frames. Check the decode-coverage figure —
+        if it's low, treat numbers with suspicion and tell Noah which firmware wrote the log.
       </div>
 
       <section className="panel p-5">
@@ -148,6 +242,14 @@ export default function BlackboxTab() {
               {reviewing ? 'Reviewing…' : 'AI tune review'}
             </button>
           </div>
+
+          {analyzing && <div className="text-sm text-stack-muted mb-4">decoding flight frames…</div>}
+          {analysisError && (
+            <div className="text-sm text-stack-warn mb-4">
+              Frame decode unavailable: {analysisError} — the AI review will use settings only.
+            </div>
+          )}
+          {analysis && <FlightAnalysis a={analysis} />}
 
           {review && (
             <div className="chat-markdown text-sm bg-stack-bg border border-stack-border rounded p-4 mb-4"

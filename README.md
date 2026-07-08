@@ -121,9 +121,12 @@ npm start
   backups, gated CLI console (read commands free; writes need confirmation +
   an existing backup; destructive commands refused), and backup **restore**
   (replays a backup line-by-line and saves).
-- **Blackbox** — upload a .bbl/.bfl log; Sageflight parses the complete
-  tuning state from the log header and the AI reviews the tune (v1 —
-  frame-level noise/step-response analysis is on the roadmap).
+- **Blackbox** — upload a .bbl/.bfl log. Sageflight parses the tuning state
+  from the header AND decodes the binary flight frames (experimental):
+  gyro noise spectra with peak detection, per-band RMS, motor
+  saturation/imbalance stats — charted, and fed to the AI so its tune
+  review cites measured numbers, not just settings. The PIDtoolbox-shaped
+  hole, closing.
 - **Checklists** — guided build → configuration → preflight checklists per
   airframe class (5" freestyle, cinewhoop, 7" long-range, whoop).
 - **AI Assistant** — offline LLM via Ollama with streaming, markdown, and a
@@ -299,8 +302,11 @@ Local runtime data (config backups, staged firmware, test history) lives in
 - [x] Tune / Modes / Sensors editor tabs (parity wave 1) + accel calibration
 - [x] Local RAG over official Betaflight docs (search_docs grounding)
 - [x] MCP server — read-only bench tools for external agents
-- [ ] Blackbox v2 — frame decoding: gyro noise spectra, step response, and
-      AI recommendations from actual flight data (the PIDtoolbox successor)
+- [x] Blackbox v2a — binary frame decoding (I/P/S/E frames, spec-derived,
+      experimental), gyro noise spectra + motor stats, AI review grounded
+      in measured flight data
+- [ ] Blackbox v2b — step-response analysis, throttle-vs-frequency heatmap,
+      validation across a corpus of real logs
 - [x] Parity wave 2: Ports editor + Presets browser (official BF repo)
 - [x] cots-catalog integration — hardware specs for the AI (search_catalog)
 - [ ] Parity wave 3: OSD editor, VTX tables, Power & battery calibration
