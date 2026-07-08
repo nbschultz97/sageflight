@@ -91,6 +91,22 @@ const PATHS = {
       <path d="M6 9h4M14 9h4M9 15h6" />
     </>
   ),
+  // failsafe / parachute
+  failsafe: (
+    <>
+      <path d="M4 10a8 8 0 0116 0" />
+      <path d="M4 10c2.5 2 5.5 2 8 0 2.5 2 5.5 2 8 0" />
+      <path d="M4 10l7 8M20 10l-7 8M12 12v6" />
+      <circle cx="12" cy="19.5" r="1.5" />
+    </>
+  ),
+  // gps / location pin
+  gps: (
+    <>
+      <path d="M12 21s-7-6.1-7-11a7 7 0 0114 0c0 4.9-7 11-7 11z" />
+      <circle cx="12" cy="10" r="2.5" />
+    </>
+  ),
   // vtx / broadcast antenna
   vtx: (
     <>

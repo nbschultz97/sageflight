@@ -1,6 +1,6 @@
 {
   "name": "sageflight-desktop",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Sageflight desktop app - AI-native FPV configurator & troubleshooter",
   "author": "Noah Schultz",
   "private": true,
@@ -43,6 +43,20 @@
         "dir"
       ],
       "icon": "build/icon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.utilities"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "build/icon.png",
+      "category": "Utility"
     },
     "nsis": {
       "oneClick": true,

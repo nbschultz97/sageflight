@@ -12,9 +12,29 @@ on:
 permissions:
   contents: write
 
+env:
+  # No signing identities in CI — skip the lookup instead of failing.
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
 jobs:
-  windows-installer:
-    runs-on: windows-latest
+  installer:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: --win
+            artifact: |
+              desktop/release/Sageflight-Setup-*.exe
+          - os: macos-latest
+            args: --mac
+            artifact: |
+              desktop/release/Sageflight-*.dmg
+          - os: ubuntu-latest
+            args: --linux
+            artifact: |
+              desktop/release/Sageflight-*.AppImage
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -45,11 +65,15 @@ jobs:
         run: npm ci
         working-directory: desktop
 
-      - name: Build Windows installer
-        run: npm run dist -- --publish never
+      - name: Bundle server tree
+        run: npm run bundle
+        working-directory: desktop
+
+      - name: Build installer
+        run: npx electron-builder ${{ matrix.args }} --publish never
         working-directory: desktop
 
       - name: Attach installer to release
         uses: softprops/action-gh-release@v2
         with:
-          files: desktop/release/Sageflight-Setup-*.exe
+          files: ${{ matrix.artifact }}

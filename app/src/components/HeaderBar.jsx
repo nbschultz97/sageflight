@@ -71,7 +71,7 @@ export default function HeaderBar() {
             <span className="text-stack-accent">SAGE</span>
             <span className="text-stack-text">FLIGHT</span>
           </div>
-          <div className="font-mono text-[11px] text-stack-muted">AI-native configurator &amp; troubleshooter · v0.5</div>
+          <div className="font-mono text-[11px] text-stack-muted">AI-native configurator &amp; troubleshooter · v0.6</div>
         </div>
       </div>
 

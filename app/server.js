@@ -26,11 +26,14 @@ const { interrogateAll } = require('../lib/esc-4way');
 const { parseIntelHex } = require('../lib/intel-hex');
 const { findDfuUtil, listDfuDevices, enterDfu, flashWithDfuUtil } = require('../lib/flash');
 const { createConnection, mspOneShot, CMD: MSP_CMD } = require('../lib/fc-connection');
-const { parseSetLines, extractTune, parseAuxLines, parseSerialLines } = require('../lib/cli-parsers');
+const {
+  parseSetLines, extractTune, parseAuxLines, parseSerialLines,
+  parseRxfailLines, FAILSAFE_GROUPS, GPS_KEYS, extractKeys,
+} = require('../lib/cli-parsers');
 const catalog = require('../lib/catalog');
 const presets = require('../lib/presets');
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 
 const app = express();
 app.use(cors());
@@ -977,6 +980,45 @@ app.get('/api/vtx', async (_req, res) => {
     const table = vtxLib.parseVtxTable(tableRaw);
     const settings = vtxLib.extractVtxSettings(vtxLib.parseGetLines(getRaw));
     res.json({ ok: true, table, settings });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ---------- Failsafe (stage 1 rxfail + stage 2 procedure + GPS Rescue) ----------
+app.get('/api/failsafe', async (_req, res) => {
+  const det = await detectFC();
+  if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: `no FC on USB (${det.type})` });
+  try {
+    const { dump, rxfailRaw } = await serialOp(() => withCli(det.comPort, async ({ send }) => {
+      const dump = await send('dump', 9000);
+      const rxfailRaw = await send('rxfail', 2000);
+      return { dump, rxfailRaw };
+    }));
+    const settings = parseSetLines(dump);
+    const groups = FAILSAFE_GROUPS.map(g => ({
+      group: g.group, label: g.label, values: extractKeys(settings, g.keys),
+    })).filter(g => Object.keys(g.values).length > 0);
+    // Prefer the dedicated command output; fall back to rxfail lines in dump
+    // for firmware that doesn't echo the full table.
+    let rxfail = parseRxfailLines(rxfailRaw);
+    if (rxfail.length === 0) rxfail = parseRxfailLines(dump);
+    res.json({ ok: true, groups, rxfail });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ---------- GPS receiver configuration ----------
+app.get('/api/gps/config', async (_req, res) => {
+  const det = await detectFC();
+  if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: `no FC on USB (${det.type})` });
+  try {
+    const dump = await serialOp(() => withCli(det.comPort, async ({ send }) => send('dump', 9000)));
+    const settings = parseSetLines(dump);
+    const values = extractKeys(settings, GPS_KEYS);
+    const featureLine = dump.match(/^feature (-?GPS)\s*$/m)?.[1] || null;
+    res.json({ ok: true, values, gpsFeature: featureLine !== null ? featureLine === 'GPS' : null });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }

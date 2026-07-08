@@ -64,8 +64,9 @@ code-signed yet) — click *More info → Run anyway*.
 Your data (config backups, test history, staged firmware, docs index) lives
 in `%APPDATA%/Sageflight/data`, and survives updates and uninstalls.
 
-macOS / Linux installers are on the roadmap; both platforms run fine from
-source today.
+macOS (`Sageflight-<version>.dmg`) and Linux (`.AppImage`) builds are on the
+same Releases page from v0.6.0 (unsigned — macOS needs right-click → Open
+the first time).
 
 ## Quick start (from source)
 
@@ -98,6 +99,10 @@ npm run dist       # build the Windows installer (desktop/release/)
   map, and link health before you ever arm.
 - **Modes** — aux switch range editor with live switch-position markers:
   flip a switch and watch the range activate before you save.
+- **Failsafe** — the setting that decides whether a lost quad falls, lands,
+  or flies home. Stage-1 per-channel behavior, stage-2 procedure, and GPS
+  Rescue parameters — every field explained in plain English, with warnings
+  when a combination is dangerous.
 - **Ports** — UART function assignment (MSP, Serial RX, GPS, VTX control,
   ESC sensor, blackbox…) with Serial-RX exclusivity handled for you.
 - **Tune** — PID / rates / filters / simplified-tuning editor read straight
@@ -113,6 +118,9 @@ npm run dist       # build the Windows installer (desktop/release/)
   band/channel/power selection with pit-mode and low-power-on-disarm
   settings. Validated client- and firmware-side; writes ride the same
   token-gated, auto-snapshotted batch path as everything else.
+- **GPS** — module setup (protocol, SBAS, auto-config, home-point policy)
+  with a wiring checklist; the prerequisite for GPS Rescue. Live satellite
+  telemetry follows bench validation.
 - **Sensors** — rolling gyro/accel traces (dead axis, offset, vibration
   triage), one-click accelerometer calibration, and voltage/current meter
   calibration with live readings to compare against a multimeter.
@@ -339,8 +347,8 @@ Local runtime data (config backups, staged firmware, test history) lives in
       real blackbox logs through the v2 decoder. Everything above is
       spec-derived until this lands; nothing gets called "stable" before it.
 - [ ] Blackbox v2c — validation across a corpus of real logs
-- [x] CI release pipeline — Windows installer built + attached on tag push
-      (GitHub Actions); macOS/Linux targets still to add
+- [x] CI release pipeline — Windows / macOS / Linux installers built +
+      attached on every tag push (GitHub Actions matrix)
 - [ ] Code signing — kill the SmartScreen warning (cert decision/cost)
 - [ ] Auto-update — electron-updater against GitHub Releases
 
@@ -351,8 +359,9 @@ Local runtime data (config backups, staged firmware, test history) lives in
       (verified live against build.betaflight.com)
 - [ ] Blackbox download from the FC — MSP dataflash read + erase, so the
       whole tune loop (fly → download → analyze → fix) happens in one tool
-- [ ] GPS + Failsafe tabs — failsafe stage 1/2 editor with plain-English
-      (and AI-explained) consequences; GPS config + live sat status
+- [x] GPS + Failsafe tabs — stage 1/2 failsafe editor with plain-English
+      consequences + GPS Rescue params; GPS module config (live sat status
+      pending bench validation)
 - [ ] Motor remap wizard — resource remap via the existing safety-gated
       spin flow ("which motor just spun? click it")
 - [ ] LED strip + Adjustments tabs; OSD font uploader
