@@ -109,6 +109,11 @@ npm start
   checkboxes, apply through the same gated write path.
 - **OSD** — element layout editor on the real canvas (analog or HD),
   per-profile visibility toggles, click-to-place.
+- **VTX** — video transmitter table editor: bands/channels frequency grid,
+  power levels (raw device codes + OSD labels), and the active
+  band/channel/power selection with pit-mode and low-power-on-disarm
+  settings. Validated client- and firmware-side; writes ride the same
+  token-gated, auto-snapshotted batch path as everything else.
 - **Sensors** — rolling gyro/accel traces (dead axis, offset, vibration
   triage), one-click accelerometer calibration, and voltage/current meter
   calibration with live readings to compare against a multimeter.
@@ -129,9 +134,12 @@ npm start
 - **Blackbox** — upload a .bbl/.bfl log. Sageflight parses the tuning state
   from the header AND decodes the binary flight frames (experimental):
   gyro noise spectra with peak detection, per-band RMS, motor
-  saturation/imbalance stats — charted, and fed to the AI so its tune
-  review cites measured numbers, not just settings. The PIDtoolbox-shaped
-  hole, closing.
+  saturation/imbalance stats, **per-axis step response** (setpoint → gyro
+  Wiener deconvolution: rise time, overshoot, tracking gain — the
+  PIDtoolbox headline plot), and a **noise-vs-throttle heatmap** that
+  separates motor/prop noise (climbs with throttle) from frame resonance
+  (constant frequency). All charted, and fed to the AI so its tune review
+  cites measured numbers, not just settings.
 - **Checklists** — guided build → configuration → preflight checklists per
   airframe class (5" freestyle, cinewhoop, 7" long-range, whoop).
 - **AI Assistant** — offline LLM via Ollama with streaming, markdown, and a
@@ -310,13 +318,15 @@ Local runtime data (config backups, staged firmware, test history) lives in
 - [x] Blackbox v2a — binary frame decoding (I/P/S/E frames, spec-derived,
       experimental), gyro noise spectra + motor stats, AI review grounded
       in measured flight data
-- [ ] Blackbox v2b — step-response analysis, throttle-vs-frequency heatmap,
-      validation across a corpus of real logs
+- [x] Blackbox v2b — step-response analysis (rise/overshoot/tracking per
+      axis) + throttle-vs-frequency heatmap, in the charts and the AI review
+- [ ] Blackbox v2c — validation across a corpus of real logs (needs bench
+      time and real .bbl files)
 - [x] Parity wave 2: Ports editor + Presets browser (official BF repo)
 - [x] cots-catalog integration — hardware specs for the AI (search_catalog)
 - [x] Parity wave 3: OSD editor, power & battery calibration, auto pre-write
       snapshots + config timeline diffing
-- [ ] VTX tables editor
+- [x] VTX tables editor — full Betaflight-configurator tab parity reached
 - [ ] ESC settings write + flashing (Bluejay/AM32) — esc-configurator parity
 - [ ] Config timeline — auto-snapshot every change, "what changed since last
       session?" diffing across your fleet

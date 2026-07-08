@@ -91,6 +91,15 @@ const PATHS = {
       <path d="M6 9h4M14 9h4M9 15h6" />
     </>
   ),
+  // vtx / broadcast antenna
+  vtx: (
+    <>
+      <path d="M12 9v11" />
+      <circle cx="12" cy="7.5" r="1.5" />
+      <path d="M8.5 4a6 6 0 000 7M15.5 4a6 6 0 010 7" />
+      <path d="M5.8 1.8a9.5 9.5 0 000 11.4M18.2 1.8a9.5 9.5 0 010 11.4" />
+    </>
+  ),
   // sensors / waveform
   sensors: (
     <>

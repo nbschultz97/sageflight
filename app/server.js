@@ -30,7 +30,7 @@ const { parseSetLines, extractTune, parseAuxLines, parseSerialLines } = require(
 const catalog = require('../lib/catalog');
 const presets = require('../lib/presets');
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 
 const app = express();
 app.use(cors());
@@ -894,6 +894,26 @@ app.get('/api/ports/config', async (_req, res) => {
   }
 });
 
+// ---------- VTX table + channel/power settings ----------
+const vtxLib = require('../lib/vtx');
+
+app.get('/api/vtx', async (_req, res) => {
+  const det = await detectFC();
+  if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: `no FC on USB (${det.type})` });
+  try {
+    const { tableRaw, getRaw } = await serialOp(() => withCli(det.comPort, async ({ send }) => {
+      const tableRaw = await send('vtxtable', 2500);
+      const getRaw = await send('get vtx', 2500);
+      return { tableRaw, getRaw };
+    }));
+    const table = vtxLib.parseVtxTable(tableRaw);
+    const settings = vtxLib.extractVtxSettings(vtxLib.parseGetLines(getRaw));
+    res.json({ ok: true, table, settings });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ---------- cots-catalog (hardware spec lookups, read-only) ----------
 app.get('/api/catalog/status', (_req, res) => {
   res.json({ ok: true, ...catalog.catalogStatus() });
@@ -1085,15 +1105,16 @@ app.post('/api/blackbox/review', async (req, res) => {
     JSON.stringify(tuning, null, 1).slice(0, 10000),
     '',
     measured
-      ? 'MEASURED flight data from decoding the log frames (gyro noise in deg/s, spectral peaks in Hz, motor outputs):\n' +
-        JSON.stringify(measured, null, 1).slice(0, 6000)
+      ? 'MEASURED flight data from decoding the log frames (gyro noise in deg/s, spectral peaks in Hz, motor outputs, per-axis step response, noise-vs-throttle):\n' +
+        JSON.stringify(measured, null, 1).slice(0, 8000)
       : 'No frame-level data available for this log (decoder could not read it) — review settings only and say so.',
     '',
     'Give a structured review:',
-    '1. **Noise** — interpret the gyro spectral peaks and band RMS: frame resonance (~80-150Hz)? motor noise tracking? Is filtering matched to the measured noise, or is there headroom to reduce filter delay?',
-    '2. **Motors** — imbalance between motor averages (mechanical issue on the high one), saturation percentage.',
-    '3. **Filters & PIDs vs the measurements** — concrete conflicts (e.g. dyn notch range missing a measured peak, RPM filter off with strong motor peaks).',
-    '4. **Top 3 concrete suggestions** — exact `set x = y` lines, most impactful first, justified by the measurements.',
+    '1. **Noise** — interpret the gyro spectral peaks and band RMS: frame resonance (~80-150Hz)? motor noise tracking? Use noiseVsThrottle: a dominant frequency that climbs with throttle is motor/prop noise (RPM filter territory); constant-frequency energy is frame resonance. Is filtering matched to the measured noise, or is there headroom to reduce filter delay?',
+    '2. **Step response** — riseMs is the 10→90% rise, steadyState 1.0 = perfect tracking, overshootPct >15-20% means too much P (or too little D); riseMs > ~60ms means sluggish gains or heavy filtering. Compare axes.',
+    '3. **Motors** — imbalance between motor averages (mechanical issue on the high one), saturation percentage.',
+    '4. **Filters & PIDs vs the measurements** — concrete conflicts (e.g. dyn notch range missing a measured peak, RPM filter off with strong motor peaks, step overshoot with high P/D ratio).',
+    '5. **Top 3 concrete suggestions** — exact `set x = y` lines, most impactful first, justified by the measurements.',
     'Be direct and cite the measured numbers. If the flight looks clean, say so.',
   ].join('\n');
 

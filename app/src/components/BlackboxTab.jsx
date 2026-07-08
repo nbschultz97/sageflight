@@ -37,6 +37,32 @@ function FlightAnalysis({ a }) {
         </div>
       </div>
 
+      {a.stepResponse?.some(sr => sr.available) && (
+        <div>
+          <div className="text-xs uppercase tracking-wide text-stack-muted mb-2">
+            Step response (setpoint → gyro, Wiener deconvolution)
+          </div>
+          <StepResponseChart series={a.stepResponse} />
+          <div className="mt-2 grid md:grid-cols-3 gap-3 text-xs">
+            {a.stepResponse.filter(sr => sr.available).map(sr => (
+              <div key={sr.axis} className="bg-stack-bg border border-stack-border rounded p-2">
+                <div className="font-semibold mb-1" style={{ color: AXIS_COLORS[sr.axis] }}>{sr.axis}</div>
+                <div className="font-mono">rise {sr.riseMs != null ? `${sr.riseMs}ms` : '—'} · peak {sr.peak} @ {sr.peakMs}ms</div>
+                <div className={sr.overshootPct > 20 ? 'text-stack-warn' : 'text-stack-muted'}>
+                  overshoot {sr.overshootPct != null ? `${sr.overshootPct}%` : '—'} · settles at {sr.steadyState}
+                </div>
+                <div className="text-stack-muted">{sr.windows} windows</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-1 text-xs text-stack-muted">
+            1.0 = perfect tracking. Big overshoot → too much P or too little D; slow rise → gains too low or heavy filtering.
+          </div>
+        </div>
+      )}
+
+      {a.throttleHeatmaps?.some(h => h.available) && <ThrottleHeatmapPanel heatmaps={a.throttleHeatmaps} />}
+
       <div>
         <div className="text-xs uppercase tracking-wide text-stack-muted mb-2">Motors</div>
         <div className="grid grid-cols-4 gap-3 text-xs">
@@ -82,6 +108,94 @@ function SpectrumChart({ axes }) {
             points={g.spectrum.map(p => `${x(p.f)},${y(p.m)}`).join(' ')} />
         ))}
       </svg>
+    </div>
+  );
+}
+
+function StepResponseChart({ series }) {
+  const W = 800, H = 180;
+  const avail = series.filter(sr => sr.available && sr.points?.length);
+  if (avail.length === 0) return null;
+  const maxT = Math.max(...avail.map(sr => sr.points[sr.points.length - 1].t));
+  const maxV = Math.max(1.3, ...avail.flatMap(sr => sr.points.map(p => p.v)));
+  const minV = Math.min(0, ...avail.flatMap(sr => sr.points.map(p => p.v)));
+  const x = (t) => (t / maxT) * W;
+  const y = (v) => H - 8 - ((v - minV) / (maxV - minV)) * (H - 20);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full bg-stack-bg border border-stack-border rounded" preserveAspectRatio="none" style={{ height: 180 }}>
+      <line x1="0" y1={y(1)} x2={W} y2={y(1)} stroke="#6a7266" strokeWidth="0.7" strokeDasharray="5 4" />
+      <text x="4" y={y(1) - 4} fill="#9aa294" fontSize="10" fontFamily="monospace">1.0</text>
+      <line x1="0" y1={y(0)} x2={W} y2={y(0)} stroke="#454d43" strokeWidth="0.5" />
+      {[100, 200, 300, 400].filter(t => t < maxT).map(t => (
+        <g key={t}>
+          <line x1={x(t)} y1="0" x2={x(t)} y2={H} stroke="#454d43" strokeWidth="0.5" />
+          <text x={x(t) + 3} y={H - 4} fill="#9aa294" fontSize="10" fontFamily="monospace">{t}ms</text>
+        </g>
+      ))}
+      {avail.map(sr => (
+        <polyline key={sr.axis} fill="none" stroke={AXIS_COLORS[sr.axis]} strokeWidth="1.4"
+          points={sr.points.map(p => `${x(p.t)},${y(p.v)}`).join(' ')} />
+      ))}
+    </svg>
+  );
+}
+
+// Magma-ish colormap over normalized log magnitude.
+function heatColor(v) {
+  const t = Math.max(0, Math.min(1, v));
+  const r = Math.round(20 + 235 * Math.min(1, t * 1.6));
+  const g = Math.round(16 + 200 * Math.max(0, t - 0.35) / 0.65);
+  const b = Math.round(38 + 60 * Math.max(0, 0.5 - t));
+  return `rgb(${r},${g},${b})`;
+}
+
+function ThrottleHeatmapPanel({ heatmaps }) {
+  const [axis, setAxis] = React.useState('roll');
+  const hm = heatmaps.find(h => h.axis === axis && h.available) || heatmaps.find(h => h.available);
+  if (!hm) return null;
+
+  // normalize on log scale against the axis max
+  let maxV = 0;
+  for (const row of hm.matrix) if (row) for (const v of row) if (v > maxV) maxV = v;
+  const norm = (v) => maxV > 0 ? Math.log1p(v * 1000) / Math.log1p(maxV * 1000) : 0;
+
+  const FB = hm.freqs.length, TB = hm.matrix.length;
+  const W = 800, H = 220, padL = 34, padB = 18;
+  const cw = (W - padL) / FB, ch = (H - padB) / TB;
+
+  return (
+    <div>
+      <div className="flex items-center gap-3 mb-2">
+        <div className="text-xs uppercase tracking-wide text-stack-muted">Noise vs throttle (freq × throttle)</div>
+        <div className="flex gap-1">
+          {heatmaps.filter(h => h.available).map(h => (
+            <button key={h.axis} onClick={() => setAxis(h.axis)}
+              className={['px-2 py-0.5 rounded text-xs font-mono border',
+                hm.axis === h.axis ? 'border-stack-accent text-stack-accent bg-stack-accent/10' : 'border-stack-border text-stack-muted hover:border-stack-accent/50',
+              ].join(' ')}>{h.axis}</button>
+          ))}
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full bg-stack-bg border border-stack-border rounded" preserveAspectRatio="none" style={{ height: 220 }}>
+        {hm.matrix.map((row, t) => row && row.map((v, f) => (
+          <rect key={`${t}-${f}`} x={padL + f * cw} y={H - padB - (t + 1) * ch}
+            width={cw + 0.5} height={ch + 0.5} fill={heatColor(norm(v))} />
+        )))}
+        {[0, 25, 50, 75, 100].map(p => (
+          <text key={p} x="2" y={H - padB - (p / 100) * (H - padB) + 4} fill="#9aa294" fontSize="9" fontFamily="monospace">{p}%</text>
+        ))}
+        {[100, 200, 300, 400, 500].filter(f => f < hm.freqs[FB - 1]).map(f => {
+          const fi = hm.freqs.findIndex(x => x >= f);
+          return fi > 0 ? (
+            <text key={f} x={padL + fi * cw} y={H - 5} fill="#9aa294" fontSize="9" fontFamily="monospace">{f}Hz</text>
+          ) : null;
+        })}
+      </svg>
+      <div className="mt-1 text-xs text-stack-muted">
+        Bright ridges that climb with throttle = motor/frame resonance (check props, soft-mount, RPM filter).
+        A bright band at constant frequency = frame resonance or a filter gap. Gray rows were never visited.
+      </div>
     </div>
   );
 }
