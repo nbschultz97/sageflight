@@ -194,17 +194,55 @@ forensic database. Surfaced in the Setup tab and through the AI's
 - macOS: `brew install dfu-util`
 - Linux: `sudo apt install dfu-util` (plus udev rules or sudo)
 
-## LLM setup (optional, for the AI Assistant / ask.js)
+## The AI stack
 
-Install [Ollama](https://ollama.com/download) and pull a tool-capable model:
+Install [Ollama](https://ollama.com/download) and pull models:
 
 ```bash
-ollama pull qwen2.5:14b       # good balance — Sageflight auto-selects the best you have
-ollama pull llama3.1:8b       # lighter fallback
+ollama pull qwen2.5:14b        # recommended chat model (32GB-RAM machines) — auto-selected
+ollama pull llama3.2:3b        # lightweight fallback for weaker hardware
+ollama pull nomic-embed-text   # embeddings for the docs index (below)
 ```
 
 Connects to `http://127.0.0.1:11434` by default; set `OLLAMA_HOST` to
 override. The system prompt lives at `llm/prompts/system.md` and is editable.
+
+**Hallucination policy — assume it, contain it, then shrink it:**
+
+1. **Contained by architecture**: facts come from tools (real scans, real
+   telemetry), every AI-proposed command is re-validated server-side, and
+   nothing executes without explicit human approval. A wrong sentence is
+   possible; a wrong actuation is not.
+2. **Shrunk by grounding**: click **Build docs index** in the AI Assistant
+   tab. Sageflight fetches the official Betaflight documentation (~200
+   files), chunks and embeds it locally, and the agent's `search_docs` tool
+   retrieves real documentation before answering settings/procedure
+   questions. Internet needed once; fully offline afterwards
+   (`data/rag/index.json`).
+3. **Shrunk by model**: bigger tool-capable model → fewer fabrications.
+   Sageflight auto-selects the strongest one you have pulled.
+
+## MCP server (bench tools for external agents)
+
+Sageflight doubles as an MCP server: any MCP-aware agent (Claude Code, etc.)
+can inspect the bench — detection, scans, live telemetry with decoded
+arming flags, config diffs, test history, forensic records, the planned
+loadout. **Read-only by design**: actuation stays behind the human-confirmed
+UI, exactly like the in-app AI.
+
+```bash
+# with the app running (cd app && npm start):
+npm run mcp
+```
+
+Register in Claude Code (`.mcp.json` in any project):
+
+```json
+{ "mcpServers": { "sageflight": { "command": "node", "args": ["<path-to>/sageflight/mcp-server.mjs"] } } }
+```
+
+It talks to the running app over HTTP (`SAGEFLIGHT_URL` to override), so
+there is never serial-port contention.
 
 ## CLI scripts (standalone)
 
@@ -250,6 +288,8 @@ Local runtime data (config backups, staged firmware, test history) lives in
 - [x] AI config migration between firmware versions
 - [x] Blackbox v1 — header/tune parsing + AI tune review
 - [x] Tune / Modes / Sensors editor tabs (parity wave 1) + accel calibration
+- [x] Local RAG over official Betaflight docs (search_docs grounding)
+- [x] MCP server — read-only bench tools for external agents
 - [ ] Blackbox v2 — frame decoding: gyro noise spectra, step response, and
       AI recommendations from actual flight data (the PIDtoolbox successor)
 - [ ] Parity wave 2: Ports editor, Presets (official BF presets repo), OSD

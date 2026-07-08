@@ -1,7 +1,7 @@
 {
   "name": "sageflight",
-  "version": "0.3.0",
-  "description": "Sageflight — AI-native FPV configurator & troubleshooter. Betaflight-style UI with an offline LLM copilot: detects, diagnoses, configures, and flashes your stack. Companion to fc-forensic.",
+  "version": "0.4.0",
+  "description": "Sageflight ??? AI-native FPV configurator & troubleshooter. Betaflight-style UI with an offline LLM copilot: detects, diagnoses, configures, and flashes your stack. Companion to fc-forensic.",
   "main": "help.js",
   "scripts": {
     "help": "node help.js",
@@ -9,7 +9,8 @@
     "spin": "node spin-test.js",
     "spin-compare": "node spin-compare.js",
     "spin-breakin": "node spin-breakin.js",
-    "ask": "node ask.js"
+    "ask": "node ask.js",
+    "mcp": "node mcp-server.mjs"
   },
   "keywords": [
     "betaflight",
@@ -24,6 +25,8 @@
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
-    "serialport": "^13.0.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "serialport": "^13.0.0",
+    "zod": "^3.25.76"
   }
 }

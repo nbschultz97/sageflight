@@ -234,6 +234,8 @@ export default function ChatTab() {
         </div>
       )}
 
+      <DocsIndexPanel ok={!!ollama?.ok} />
+
       <div className="flex flex-wrap items-center gap-4 text-sm">
         <Toggle
           checked={agentMode}
@@ -340,6 +342,72 @@ export default function ChatTab() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Local Betaflight docs index — grounds the AI in real documentation
+// (search_docs tool) instead of model memory. Build needs internet once.
+function DocsIndexPanel({ ok }) {
+  const [status, setStatus] = useState(null);
+  const [building, setBuilding] = useState(false);
+  const [progress, setProgress] = useState('');
+  const [error, setError] = useState(null);
+
+  async function refresh() {
+    try { setStatus(await (await fetch('/api/rag/status')).json()); } catch {}
+  }
+  useEffect(() => { refresh(); }, []);
+
+  async function build() {
+    setBuilding(true); setError(null); setProgress('starting…');
+    try {
+      const res = await fetch('/api/rag/build', { method: 'POST' });
+      if (!res.ok || !res.body) throw new Error('build stream failed');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf('\n\n')) !== -1) {
+          const chunk = buf.slice(0, nl); buf = buf.slice(nl + 2);
+          if (!chunk.startsWith('data:')) continue;
+          try {
+            const obj = JSON.parse(chunk.slice(5).trim());
+            if (obj.error) setError(obj.error);
+            if (obj.stage) setProgress(obj.msg);
+            if (obj.done) setProgress(`done — ${obj.chunks} chunks indexed`);
+          } catch {}
+        }
+      }
+      await refresh();
+    } catch (e) { setError(e.message); }
+    finally { setBuilding(false); }
+  }
+
+  if (!status) return null;
+  return (
+    <div className="panel p-3 flex items-center justify-between gap-3 text-sm">
+      <div className="flex items-center gap-2 min-w-0">
+        {status.built
+          ? <span className="pill-ok shrink-0">docs grounded</span>
+          : <span className="pill-warn shrink-0">no docs index</span>}
+        <span className="text-stack-muted text-xs truncate">
+          {building ? progress
+            : status.built ? `${status.chunks} chunks of official Betaflight docs · built ${status.builtAt?.slice(0, 10)} · answers cite real documentation`
+            : 'Build a local Betaflight docs index so the AI cites documentation instead of guessing. Needs internet once (~5 min); offline forever after.'}
+        </span>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        {error && <span className="text-stack-err text-xs">{error}</span>}
+        <button className="btn-ghost text-xs" disabled={building || !ok} onClick={build}
+          title={!ok ? 'Ollama must be running' : undefined}>
+          {building ? 'Building…' : status.built ? 'Rebuild' : 'Build docs index'}
+        </button>
+      </div>
     </div>
   );
 }

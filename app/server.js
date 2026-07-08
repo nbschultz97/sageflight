@@ -28,7 +28,7 @@ const { findDfuUtil, listDfuDevices, enterDfu, flashWithDfuUtil } = require('../
 const { createConnection, mspOneShot, CMD: MSP_CMD } = require('../lib/fc-connection');
 const { parseSetLines, extractTune, parseAuxLines } = require('../lib/cli-parsers');
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 
 const app = express();
 app.use(cors());
@@ -652,6 +652,90 @@ app.post('/api/config/restore', async (req, res) => {
   }
 });
 
+// ---------- RAG (local docs grounding for the AI) ----------
+const rag = require('../lib/rag');
+const EMBED_MODEL = 'nomic-embed-text';
+const DOCS_REPO = 'betaflight/betaflight.com';
+let ragIndexCache = null; // reload lazily after builds
+
+async function embedTexts(texts) {
+  const r = await fetch(OLLAMA_HOST + '/api/embed', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: EMBED_MODEL, input: texts }),
+    signal: AbortSignal.timeout(120000),
+  });
+  if (!r.ok) throw new Error(`Ollama embed: ${r.status} ${(await r.text()).slice(0, 150)}`);
+  const data = await r.json();
+  return data.embeddings;
+}
+
+async function searchDocs(query, k = 4) {
+  if (!ragIndexCache) ragIndexCache = rag.loadIndex();
+  if (!ragIndexCache) return null;
+  const [qe] = await embedTexts([query]);
+  return rag.search(ragIndexCache, qe, k);
+}
+
+app.get('/api/rag/status', (_req, res) => {
+  res.json({ ok: true, ...rag.indexStatus() });
+});
+
+// Build the docs index: fetch official Betaflight docs from GitHub, chunk,
+// embed locally. Needs internet + Ollama once; afterwards fully offline.
+app.post('/api/rag/build', async (_req, res) => {
+  sseHeaders(res);
+  const stage = (msg) => sseSend(res, { stage: 'build', msg });
+  try {
+    // Verify the embedding model is available before a long fetch.
+    const tags = await (await fetch(OLLAMA_HOST + '/api/tags', { signal: AbortSignal.timeout(3000) })).json();
+    if (!(tags.models || []).some(m => m.name.startsWith(EMBED_MODEL))) {
+      throw new Error(`embedding model missing — run: ollama pull ${EMBED_MODEL}`);
+    }
+
+    stage(`Listing docs in ${DOCS_REPO}...`);
+    const tree = await (await fetch(`https://api.github.com/repos/${DOCS_REPO}/git/trees/HEAD?recursive=1`, {
+      headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'sageflight' },
+      signal: AbortSignal.timeout(15000),
+    })).json();
+    const files = (tree.tree || [])
+      .filter(f => f.type === 'blob' && /^docs\/.*\.(md|mdx)$/.test(f.path) && !/\/(archive|development)\//.test(f.path))
+      .slice(0, 250);
+    if (files.length === 0) throw new Error('no docs found — GitHub API unreachable or repo layout changed');
+    stage(`${files.length} docs files. Fetching + chunking...`);
+
+    const chunks = [];
+    let fetched = 0;
+    for (const f of files) {
+      try {
+        const raw = await (await fetch(`https://raw.githubusercontent.com/${DOCS_REPO}/HEAD/${f.path}`, {
+          signal: AbortSignal.timeout(15000),
+        })).text();
+        for (const c of rag.chunkMarkdown(rag.cleanDoc(raw))) {
+          chunks.push({ source: f.path.replace(/^docs\//, ''), ...c });
+        }
+      } catch {}
+      if (++fetched % 40 === 0) stage(`${fetched}/${files.length} files fetched, ${chunks.length} chunks so far`);
+    }
+    stage(`Embedding ${chunks.length} chunks with ${EMBED_MODEL} (local)...`);
+
+    for (let i = 0; i < chunks.length; i += 24) {
+      const batch = chunks.slice(i, i + 24);
+      const embeddings = await embedTexts(batch.map(c => `${c.heading}\n${c.text}`.slice(0, 2000)));
+      batch.forEach((c, j) => { c.embedding = embeddings[j]; });
+      if ((i / 24) % 10 === 0) stage(`embedded ${Math.min(i + 24, chunks.length)}/${chunks.length}`);
+    }
+
+    rag.saveIndex({ builtAt: new Date().toISOString(), model: EMBED_MODEL, sources: DOCS_REPO, chunks });
+    ragIndexCache = null;
+    sseSend(res, { done: true, chunks: chunks.length });
+    res.end();
+  } catch (e) {
+    sseSend(res, { error: e.message });
+    res.end();
+  }
+});
+
 // ---------- Tune (PIDs / rates / filters editor) ----------
 // Read via CLI `dump` (includes defaults, unlike diff); write path is the
 // existing token-gated /api/cli/batch — this endpoint is read-only.
@@ -1034,6 +1118,7 @@ const execTool = createToolExecutor({
   store,
   forensic,
   connection: conn,
+  searchDocs,
 });
 
 const MAX_AGENT_ROUNDS = 6;
@@ -1045,9 +1130,11 @@ app.post('/api/agent/chat', async (req, res) => {
   const convo = [
     { role: 'system', content: readSystemPrompt() +
       '\n\nYou have live tools: detect_fc, scan_fc, get_config_diff, get_motor_history, list_config_backups,' +
-      ' get_forensic_record, list_forensic_units, get_last_esc_scan, get_live_telemetry, propose_config_changes.' +
+      ' get_forensic_record, list_forensic_units, get_last_esc_scan, get_live_telemetry, get_loadout,' +
+      ' search_docs, propose_config_changes.' +
       ' Use them to look at the aircraft instead of asking the user for information a tool can fetch.' +
       ' For "why won\'t it arm" questions, call get_live_telemetry first — it decodes the arming-disable flags.' +
+      ' Before answering questions about CLI settings, features, or procedures, call search_docs and ground your answer in what it returns.' +
       ' To change configuration, use propose_config_changes — the user reviews and approves the commands before they run.' +
       ' You can NOT spin motors or flash firmware — direct the user to the Motors/Flash tabs for that.' },
     ...messages,
