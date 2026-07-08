@@ -645,6 +645,36 @@ app.post('/api/config/restore', async (req, res) => {
   }
 });
 
+// ---------- Loadout (COTS-Architect bridge) ----------
+const loadoutLib = require('../lib/loadout');
+
+app.post('/api/loadout', (req, res) => {
+  const v = loadoutLib.validateLoadout(req.body);
+  if (!v.ok) return res.status(400).json({ ok: false, error: 'invalid loadout', errors: v.errors });
+  store.saveLoadout(req.body);
+  res.json({ ok: true, summary: loadoutLib.summarizeLoadout(req.body) });
+});
+
+app.get('/api/loadout', (_req, res) => {
+  const loadout = store.readLoadout();
+  res.json({ ok: true, loadout, summary: loadoutLib.summarizeLoadout(loadout) });
+});
+
+app.delete('/api/loadout', (_req, res) => {
+  store.clearLoadout();
+  res.json({ ok: true });
+});
+
+// As-designed vs. as-built. The client sends its last scan (it owns that
+// state); the last ESC interrogation comes from server-side history.
+app.post('/api/loadout/verify', (req, res) => {
+  const loadout = store.readLoadout();
+  if (!loadout) return res.status(400).json({ ok: false, error: 'no loadout imported' });
+  const escScan = store.readHistory(200).find(h => h.kind === 'esc.interrogate') || null;
+  const result = loadoutLib.verifyAgainstBench(loadout, { scan: req.body?.scan || null, escScan });
+  res.json({ ok: true, loadout: loadoutLib.summarizeLoadout(loadout), ...result });
+});
+
 // ---------- Blackbox (v1: header/settings analysis + AI tune review) ----------
 const { parseHeaders, selectTuningSettings } = require('../lib/blackbox-header');
 

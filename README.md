@@ -157,6 +157,19 @@ Layers the LLM cannot bypass:
 All serial access is serialized through a mutex — a scan can never collide
 with a motor test.
 
+## Ecosystem integrations (all optional — Sageflight is fully standalone)
+
+Every Ceradon tool works on its own; integrations are loose file/data
+contracts, never runtime dependencies.
+
+- **COTS-Architect (planning/inventory) → Sageflight**: export a planned
+  build as [Ceradon Loadout v1 JSON](docs/loadout-schema.md), import it in
+  the Checklists tab. You get a kit-check stage, the right checklist set
+  auto-selected, and one-click **as-built verification** — planned board
+  target / firmware / motor count / ESC firmware vs. what the bench
+  actually reports. The AI reads the plan via `get_loadout`.
+- **fc-forensic → Sageflight**: see below.
+
 ## stack-forensic integration
 
 Sageflight looks for your fc-forensic checkout automatically (a sibling
