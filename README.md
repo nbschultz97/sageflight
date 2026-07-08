@@ -97,6 +97,13 @@ npm start
   and cross-references your fc-forensic case history by MCU id.
 - **Receiver** — live RC channel bars. Verify endpoints, centering, channel
   map, and link health before you ever arm.
+- **Modes** — aux switch range editor with live switch-position markers:
+  flip a switch and watch the range activate before you save.
+- **Tune** — PID / rates / filters / simplified-tuning editor read straight
+  off the FC, with AI review of your current and pending values before a
+  backup-gated save.
+- **Sensors** — rolling gyro/accel traces (dead axis, offset, vibration
+  triage) and one-click accelerometer calibration.
 - **Motors** — live motor output bars while connected, plus safety-gated
   single-motor spin and 4-motor voltage-sag comparison (flags outliers
   consistent with inter-turn shorts). Every test logged to local history.
@@ -242,9 +249,11 @@ Local runtime data (config backups, staged firmware, test history) lives in
 - [x] Arming doctor — decoded arming-disable flags with fixes, AI-readable
 - [x] AI config migration between firmware versions
 - [x] Blackbox v1 — header/tune parsing + AI tune review
+- [x] Tune / Modes / Sensors editor tabs (parity wave 1) + accel calibration
 - [ ] Blackbox v2 — frame decoding: gyro noise spectra, step response, and
       AI recommendations from actual flight data (the PIDtoolbox successor)
-- [ ] Modes/Ports editors (aux ranges, UART functions) with AI explanations
+- [ ] Parity wave 2: Ports editor, Presets (official BF presets repo), OSD
+      editor, VTX tables, Power & battery calibration
 - [ ] ESC settings write + flashing (Bluejay/AM32) — esc-configurator parity
 - [ ] Config timeline — auto-snapshot every change, "what changed since last
       session?" diffing across your fleet
