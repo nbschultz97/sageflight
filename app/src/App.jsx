@@ -5,6 +5,9 @@ import HeaderBar from './components/HeaderBar';
 import StatusBar from './components/StatusBar';
 import DetectTab from './components/DetectTab';
 import ReceiverTab from './components/ReceiverTab';
+import ModesTab from './components/ModesTab';
+import TuneTab from './components/TuneTab';
+import SensorsTab from './components/SensorsTab';
 import MotorsTab from './components/MotorsTab';
 import EscTab from './components/EscTab';
 import ConfigTab from './components/ConfigTab';
@@ -16,6 +19,9 @@ import FlashTab from './components/FlashTab';
 const TABS = [
   { id: 'detect',     label: 'Setup',            icon: 'setup' },
   { id: 'receiver',   label: 'Receiver',         icon: 'receiver' },
+  { id: 'modes',      label: 'Modes',            icon: 'modes' },
+  { id: 'tune',       label: 'Tune',             icon: 'tune' },
+  { id: 'sensors',    label: 'Sensors',          icon: 'sensors' },
   { id: 'motors',     label: 'Motors',           icon: 'motors' },
   { id: 'esc',        label: 'ESC',              icon: 'esc' },
   { id: 'config',     label: 'Config / CLI',     icon: 'config' },
@@ -38,6 +44,9 @@ export default function App() {
           <main className="flex-1 overflow-auto p-6 min-w-0">
             {tab === 'detect'     && <DetectTab />}
             {tab === 'receiver'   && <ReceiverTab />}
+            {tab === 'modes'      && <ModesTab />}
+            {tab === 'tune'       && <TuneTab />}
+            {tab === 'sensors'    && <SensorsTab />}
             {tab === 'motors'     && <MotorsTab />}
             {tab === 'esc'        && <EscTab />}
             {tab === 'config'     && <ConfigTab />}

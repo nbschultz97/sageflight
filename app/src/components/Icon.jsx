@@ -54,6 +54,28 @@ const PATHS = {
       <circle cx="12" cy="12" r="1.2" />
     </>
   ),
+  // modes / switch
+  modes: (
+    <>
+      <rect x="3" y="9" width="18" height="6" rx="3" />
+      <circle cx="16" cy="12" r="2.2" />
+    </>
+  ),
+  // tune / sliders
+  tune: (
+    <>
+      <path d="M5 4v6M5 14v6M12 4v10M12 18v2M19 4v2M19 10v10" />
+      <circle cx="5" cy="12" r="2" />
+      <circle cx="12" cy="16" r="2" />
+      <circle cx="19" cy="8" r="2" />
+    </>
+  ),
+  // sensors / waveform
+  sensors: (
+    <>
+      <path d="M3 12h3l2-6 4 12 3-9 2 3h4" />
+    </>
+  ),
   // blackbox / flight recorder
   blackbox: (
     <>

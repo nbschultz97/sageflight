@@ -25,7 +25,8 @@ const forensic = require('../lib/forensic-db');
 const { interrogateAll } = require('../lib/esc-4way');
 const { parseIntelHex } = require('../lib/intel-hex');
 const { findDfuUtil, listDfuDevices, enterDfu, flashWithDfuUtil } = require('../lib/flash');
-const { createConnection } = require('../lib/fc-connection');
+const { createConnection, mspOneShot, CMD: MSP_CMD } = require('../lib/fc-connection');
+const { parseSetLines, extractTune, parseAuxLines } = require('../lib/cli-parsers');
 
 const VERSION = '0.3.0';
 
@@ -167,6 +168,12 @@ app.post('/api/safety/confirm', (req, res) => {
         ok: false,
         error: 'This action requires acknowledged=true AND backupTaken=true (take a backup in the Config tab first).',
       });
+    }
+  } else if (action === 'sensor.calibrate') {
+    // Accel calibration: harmless but writes calibration values. Quad must be
+    // level and still — that's on the human.
+    if (!acknowledged) {
+      return res.status(400).json({ ok: false, error: 'Calibration requires acknowledged=true (quad level and still).' });
     }
   } else {
     return res.status(400).json({ ok: false, error: `unknown action: ${action}` });
@@ -642,6 +649,105 @@ app.post('/api/config/restore', async (req, res) => {
     res.end();
   } catch (e) {
     fail(e.message);
+  }
+});
+
+// ---------- Tune (PIDs / rates / filters editor) ----------
+// Read via CLI `dump` (includes defaults, unlike diff); write path is the
+// existing token-gated /api/cli/batch — this endpoint is read-only.
+app.get('/api/tune', async (_req, res) => {
+  const det = await detectFC();
+  if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: `no FC on USB (${det.type})` });
+  try {
+    const dump = await serialOp(() => withCli(det.comPort, async ({ send }) => send('dump', 9000)));
+    const settings = parseSetLines(dump);
+    if (Object.keys(settings).length < 10) {
+      return res.status(500).json({ ok: false, error: 'dump returned too little data — FC may not be in a healthy CLI state' });
+    }
+    res.json({ ok: true, groups: extractTune(settings) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// AI sanity-check of current + pending tune values — streamed markdown.
+app.post('/api/tune/review', async (req, res) => {
+  const { groups = [], changes = {}, model = 'llama3.2:3b' } = req.body || {};
+  sseHeaders(res);
+  const prompt = [
+    'You are an expert FPV tuner. Review this Betaflight tune.',
+    '',
+    'Current values by group:',
+    JSON.stringify(groups).slice(0, 8000),
+    '',
+    Object.keys(changes).length
+      ? `The user is about to change these values (key: new value):\n${JSON.stringify(changes)}`
+      : 'No pending changes — review the current state.',
+    '',
+    'Answer concisely: 1) anything out-of-family or dangerous (filters too low, D too high, RPM filter without bidir dshot), 2) whether the pending changes are sensible, 3) up to 3 concrete `set` suggestions. If it all looks sane, say so briefly.',
+  ].join('\n');
+
+  try {
+    const r = await fetch(OLLAMA_HOST + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], stream: true }),
+    });
+    if (!r.ok || !r.body) throw new Error(`Ollama: ${r.status}`);
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        try {
+          const chunk = JSON.parse(line);
+          if (chunk.message?.content) sseSend(res, { token: chunk.message.content });
+          if (chunk.done) { sseSend(res, { done: true }); res.end(); return; }
+        } catch {}
+      }
+    }
+    res.end();
+  } catch (e) {
+    sseSend(res, { error: e.message });
+    res.end();
+  }
+});
+
+// ---------- Modes (aux switch ranges) ----------
+app.get('/api/modes', async (_req, res) => {
+  const det = await detectFC();
+  if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: `no FC on USB (${det.type})` });
+  try {
+    const out = await serialOp(() => withCli(det.comPort, async ({ send }) => send('aux', 2000)));
+    res.json({ ok: true, slots: parseAuxLines(out) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ---------- Sensor calibration ----------
+app.post('/api/calibrate/acc', async (req, res) => {
+  const { token } = req.body || {};
+  if (!consumeToken(token, 'sensor.calibrate')) {
+    return res.status(403).json({ ok: false, error: 'invalid or missing safety token' });
+  }
+  const det = await detectFC();
+  if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: `no FC on USB (${det.type})` });
+  try {
+    await serialOp(() => mspOneShot(det.comPort, MSP_CMD.ACC_CALIBRATION));
+    // FC needs a moment to settle the calibration before further traffic.
+    await new Promise(r => setTimeout(r, 2500));
+    store.appendHistory({ kind: 'calibrate.acc' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
