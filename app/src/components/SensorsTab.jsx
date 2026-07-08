@@ -50,7 +50,106 @@ export default function SensorsTab() {
           <AccCalPanel />
         </>
       )}
+
+      <PowerCalPanel telemetry={telemetry} connected={connected} />
     </div>
+  );
+}
+
+// Voltage/current meter calibration: compare live readings against a
+// multimeter and adjust scales. Values load from the FC dump.
+function PowerCalPanel({ telemetry, connected }) {
+  const [values, setValues] = useState(null);
+  const [edits, setEdits] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState(null);
+  const [done, setDone] = useState(false);
+
+  async function load() {
+    setLoading(true); setError(null); setEdits({}); setDone(false);
+    try {
+      const j = await (await fetch('/api/power')).json();
+      if (!j.ok) throw new Error(j.error || 'read failed');
+      setValues(j.values);
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  }
+
+  const changed = Object.entries(edits).filter(([k, v]) => values && String(v) !== String(values[k]) && v !== '');
+
+  async function apply() {
+    setApplying(true); setError(null);
+    try {
+      const commands = [...changed.map(([k, v]) => `set ${k} = ${v}`), 'save'];
+      const tr = await fetch('/api/safety/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'config.write', acknowledged: true, backupTaken: true }),
+      });
+      const tj = await tr.json();
+      if (!tj.ok) throw new Error(tj.error || 'token refused');
+      const r = await fetch('/api/cli/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: tj.token, commands }),
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || 'apply failed');
+      setDone(true);
+      await new Promise(r2 => setTimeout(r2, 3500));
+      await load();
+    } catch (e) { setError(e.message); }
+    finally { setApplying(false); }
+  }
+
+  const an = telemetry?.analog;
+
+  return (
+    <section className="panel p-5 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-stack-muted">Power &amp; battery calibration</div>
+          <div className="text-sm text-stack-muted mt-1">
+            {connected && an
+              ? <>FC reads <span className="font-mono text-stack-text">{an.voltage.toFixed(2)}V</span> / <span className="font-mono text-stack-text">{an.amperage.toFixed(2)}A</span> — compare with a multimeter, then adjust <span className="font-mono">vbat_scale</span> / <span className="font-mono">ibata_scale</span> proportionally.</>
+              : 'Connect (with battery) to compare live readings against a multimeter while you calibrate.'}
+          </div>
+        </div>
+        <button className="btn-ghost text-sm shrink-0" disabled={loading} onClick={load}>
+          {loading ? 'Reading…' : values ? 'Re-read' : 'Read from FC'}
+        </button>
+      </div>
+
+      {error && <div className="text-sm text-stack-err">{error}</div>}
+
+      {values && (
+        <>
+          <div className="grid md:grid-cols-2 gap-x-10 gap-y-2">
+            {Object.entries(values).map(([k, v]) => (
+              <label key={k} className="flex items-center justify-between gap-3 text-sm">
+                <span className="font-mono text-xs text-stack-muted">{k}</span>
+                <input
+                  value={k in edits ? edits[k] : v}
+                  onChange={e => setEdits(ed => ({ ...ed, [k]: e.target.value }))}
+                  className={[
+                    'w-28 bg-stack-bg border rounded px-2 py-1 font-mono text-xs outline-none focus:border-stack-accent',
+                    changed.some(([ck]) => ck === k) ? 'border-stack-warn text-stack-warn' : 'border-stack-border',
+                  ].join(' ')}
+                />
+              </label>
+            ))}
+          </div>
+          <div className="flex items-center justify-end gap-3">
+            {done && <span className="pill-ok">applied + saved</span>}
+            <button className={changed.length ? 'btn-primary text-sm' : 'btn-ghost text-sm opacity-50 cursor-not-allowed'}
+              disabled={!changed.length || applying} onClick={apply}>
+              {applying ? 'Applying…' : `Apply ${changed.length || ''} change(s) + save`}
+            </button>
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 

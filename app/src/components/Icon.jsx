@@ -84,6 +84,13 @@ const PATHS = {
       <path d="M4 12h16M12 8v12M12 8c-4 0-5-5-2-5s2 5 2 5zM12 8c4 0 5-5 2-5s-2 5-2 5z" />
     </>
   ),
+  // osd / screen overlay
+  osd: (
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="1.5" />
+      <path d="M6 9h4M14 9h4M9 15h6" />
+    </>
+  ),
   // sensors / waveform
   sensors: (
     <>

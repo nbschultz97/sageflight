@@ -9,6 +9,7 @@ import ModesTab from './components/ModesTab';
 import PortsTab from './components/PortsTab';
 import TuneTab from './components/TuneTab';
 import PresetsTab from './components/PresetsTab';
+import OsdTab from './components/OsdTab';
 import SensorsTab from './components/SensorsTab';
 import MotorsTab from './components/MotorsTab';
 import EscTab from './components/EscTab';
@@ -25,6 +26,7 @@ const TABS = [
   { id: 'ports',      label: 'Ports',            icon: 'ports' },
   { id: 'tune',       label: 'Tune',             icon: 'tune' },
   { id: 'presets',    label: 'Presets',          icon: 'presets' },
+  { id: 'osd',        label: 'OSD',              icon: 'osd' },
   { id: 'sensors',    label: 'Sensors',          icon: 'sensors' },
   { id: 'motors',     label: 'Motors',           icon: 'motors' },
   { id: 'esc',        label: 'ESC',              icon: 'esc' },
@@ -52,6 +54,7 @@ export default function App() {
             {tab === 'ports'      && <PortsTab />}
             {tab === 'tune'       && <TuneTab />}
             {tab === 'presets'    && <PresetsTab />}
+            {tab === 'osd'        && <OsdTab />}
             {tab === 'sensors'    && <SensorsTab />}
             {tab === 'motors'     && <MotorsTab />}
             {tab === 'esc'        && <EscTab />}

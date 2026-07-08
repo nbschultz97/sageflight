@@ -4,7 +4,23 @@ export default function ConfigTab() {
   const [backups, setBackups] = useState([]);
   const [backingUp, setBackingUp] = useState(false);
   const [viewing, setViewing] = useState(null); // { id, content }
+  const [compare, setCompare] = useState([]);   // up to 2 backup ids
+  const [diff, setDiff] = useState(null);
   const [error, setError] = useState(null);
+
+  async function toggleCompare(id) {
+    setDiff(null);
+    const next = compare.includes(id) ? compare.filter(c => c !== id) : [...compare.slice(-1), id];
+    setCompare(next);
+    if (next.length === 2) {
+      const [a, b] = [...next].sort(); // ids are timestamped — older first
+      try {
+        const j = await (await fetch(`/api/config/backups/${encodeURIComponent(a)}/diff/${encodeURIComponent(b)}`)).json();
+        if (!j.ok) throw new Error(j.error || 'diff failed');
+        setDiff(j);
+      } catch (e) { setError(e.message); }
+    }
+  }
 
   async function refreshBackups() {
     try {
@@ -69,8 +85,9 @@ export default function ConfigTab() {
           <table className="w-full text-sm">
             <thead className="text-xs text-stack-muted uppercase">
               <tr>
+                <th className="text-left pb-2 pr-3" title="pick two to compare">Δ</th>
                 <th className="text-left pb-2 pr-4">When</th>
-                <th className="text-left pb-2 pr-4">Board</th>
+                <th className="text-left pb-2 pr-4">Board / kind</th>
                 <th className="text-left pb-2 pr-4">Size</th>
                 <th className="text-left pb-2">Actions</th>
               </tr>
@@ -78,8 +95,15 @@ export default function ConfigTab() {
             <tbody>
               {backups.map(b => (
                 <tr key={b.id} className="border-t border-stack-border">
+                  <td className="py-2 pr-3">
+                    <input type="checkbox" className="w-4 h-4 accent-stack-accent"
+                      checked={compare.includes(b.id)} onChange={() => toggleCompare(b.id)} />
+                  </td>
                   <td className="py-2 pr-4 font-mono text-xs">{b.createdAt?.replace('T', ' ').slice(0, 19)}</td>
-                  <td className="py-2 pr-4">{b.boardName || '—'}</td>
+                  <td className="py-2 pr-4">
+                    {b.boardName || '—'}
+                    {b.auto && <span className="pill-muted ml-2" title={b.reason}>auto</span>}
+                  </td>
                   <td className="py-2 pr-4 font-mono text-xs">{b.bytes != null ? `${(b.bytes / 1024).toFixed(1)} KB` : '—'}</td>
                   <td className="py-2 space-x-3">
                     <button className="text-stack-accent hover:underline" onClick={() => openBackup(b.id)}>view</button>
@@ -94,6 +118,9 @@ export default function ConfigTab() {
             </tbody>
           </table>
         )}
+
+        {compare.length === 1 && <div className="mt-3 text-xs text-stack-muted">Pick a second backup to see what changed between them.</div>}
+        {diff && <BackupDiff diff={diff} onClose={() => { setDiff(null); setCompare([]); }} />}
 
         {viewing && (
           <div className="mt-4 border-t border-stack-border pt-4">
@@ -112,6 +139,32 @@ export default function ConfigTab() {
       {error && <div className="panel p-4 border-stack-err text-stack-err text-sm">{error}</div>}
 
       <CliConsole hasBackup={backups.length > 0} />
+    </div>
+  );
+}
+
+// "What changed between these two configs" — the timeline view.
+function BackupDiff({ diff, onClose }) {
+  const total = diff.changed.length + diff.added.length + diff.removed.length + diff.otherAdded.length + diff.otherRemoved.length;
+  return (
+    <div className="mt-4 border-t border-stack-border pt-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-mono text-stack-muted">
+          {diff.from} → {diff.to} · {total ? `${total} difference(s)` : 'identical configs'}
+        </div>
+        <button className="text-stack-muted hover:underline text-sm" onClick={onClose}>close</button>
+      </div>
+      {total > 0 && (
+        <div className="bg-stack-bg border border-stack-border rounded p-3 text-xs font-mono max-h-80 overflow-auto space-y-0.5">
+          {diff.changed.map(c => (
+            <div key={c.key}><span className="text-stack-warn">~ set {c.key}</span> <span className="text-stack-muted line-through">{c.from}</span> → <span className="text-stack-text">{c.to}</span></div>
+          ))}
+          {diff.added.map(c => <div key={c.key} className="text-stack-ok">+ set {c.key} = {c.value}</div>)}
+          {diff.removed.map(c => <div key={c.key} className="text-stack-err">- set {c.key} = {c.value}</div>)}
+          {diff.otherAdded.map((l, i) => <div key={`oa${i}`} className="text-stack-ok">+ {l}</div>)}
+          {diff.otherRemoved.map((l, i) => <div key={`or${i}`} className="text-stack-err">- {l}</div>)}
+        </div>
+      )}
     </div>
   );
 }

@@ -405,7 +405,16 @@ app.post('/api/cli/batch', async (req, res) => {
 
   const savesLast = list[list.length - 1]?.toLowerCase() === 'save';
   try {
+    let autoBackupId = null;
     const results = await serialOp(() => withCli(det.comPort, async ({ send }) => {
+      // Safety net + config timeline: snapshot the config in the same CLI
+      // session before any write lands, regardless of UI checkboxes.
+      try {
+        const diff = (await send('diff all', 8000)).trim();
+        if (diff.length > 20) {
+          autoBackupId = store.saveBackup(diff, { auto: true, reason: 'pre-write snapshot', comPort: det.comPort }).id;
+        }
+      } catch {}
       const out = [];
       for (const line of list) {
         // `save` reboots the FC and drops the port — tolerate a dead write.
@@ -414,11 +423,39 @@ app.post('/api/cli/batch', async (req, res) => {
       }
       return out;
     }));
-    store.appendHistory({ kind: 'config.batch', commands: list.length, saved: savesLast });
-    res.json({ ok: true, results, saved: savesLast });
+    store.appendHistory({ kind: 'config.batch', commands: list.length, saved: savesLast, autoBackupId });
+    res.json({ ok: true, results, saved: savesLast, autoBackupId });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
+});
+
+// Line-level diff between two backups — the config timeline's "what
+// changed". Compares `set` lines plus everything else as raw lines.
+app.get('/api/config/backups/:a/diff/:b', (req, res) => {
+  const a = store.readBackup(req.params.a);
+  const b = store.readBackup(req.params.b);
+  if (a == null || b == null) return res.status(404).json({ ok: false, error: 'backup not found' });
+
+  const setsA = parseSetLines(a);
+  const setsB = parseSetLines(b);
+  const changed = [];
+  const removed = [];
+  const added = [];
+  for (const [k, v] of Object.entries(setsA)) {
+    if (!(k in setsB)) removed.push({ key: k, value: v });
+    else if (setsB[k] !== v) changed.push({ key: k, from: v, to: setsB[k] });
+  }
+  for (const [k, v] of Object.entries(setsB)) {
+    if (!(k in setsA)) added.push({ key: k, value: v });
+  }
+  // Non-`set` lines (aux, serial, feature...) — set-difference both ways.
+  const otherLines = (t) => new Set(t.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#') && !l.startsWith('set ')));
+  const oa = otherLines(a), ob = otherLines(b);
+  const otherRemoved = [...oa].filter(l => !ob.has(l));
+  const otherAdded = [...ob].filter(l => !oa.has(l));
+
+  res.json({ ok: true, from: req.params.a, to: req.params.b, changed, added, removed, otherAdded, otherRemoved });
 });
 
 // ---------- Firmware flash (backup-first, dfu-util, verify-after) ----------
@@ -803,6 +840,45 @@ app.post('/api/tune/review', async (req, res) => {
   } catch (e) {
     sseSend(res, { error: e.message });
     res.end();
+  }
+});
+
+// ---------- OSD (element layout editor) ----------
+const osd = require('../lib/osd');
+
+app.get('/api/osd', async (_req, res) => {
+  const det = await detectFC();
+  if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: `no FC on USB (${det.type})` });
+  try {
+    const dump = await serialOp(() => withCli(det.comPort, async ({ send }) => send('dump', 9000)));
+    const settings = parseSetLines(dump);
+    const elements = osd.extractOsdElements(settings);
+    if (elements.length === 0) return res.status(422).json({ ok: false, error: 'no OSD elements found — OSD may be disabled in this firmware build' });
+    res.json({ ok: true, canvas: osd.canvasFromSettings(settings), elements });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ---------- Power & battery calibration values ----------
+const POWER_KEYS = [
+  'vbat_scale', 'vbat_divider', 'vbat_multiplier',
+  'ibata_scale', 'ibata_offset',
+  'vbat_max_cell_voltage', 'vbat_min_cell_voltage', 'vbat_warning_cell_voltage',
+  'force_battery_cell_count', 'current_meter', 'battery_meter',
+];
+
+app.get('/api/power', async (_req, res) => {
+  const det = await detectFC();
+  if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: `no FC on USB (${det.type})` });
+  try {
+    const dump = await serialOp(() => withCli(det.comPort, async ({ send }) => send('dump', 9000)));
+    const settings = parseSetLines(dump);
+    const values = {};
+    for (const k of POWER_KEYS) if (k in settings) values[k] = settings[k];
+    res.json({ ok: true, values });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 

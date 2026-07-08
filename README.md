@@ -107,8 +107,11 @@ npm start
 - **Presets** — the official Betaflight community presets repo: search,
   filter by your firmware version, review the exact CLI lines and option
   checkboxes, apply through the same gated write path.
+- **OSD** — element layout editor on the real canvas (analog or HD),
+  per-profile visibility toggles, click-to-place.
 - **Sensors** — rolling gyro/accel traces (dead axis, offset, vibration
-  triage) and one-click accelerometer calibration.
+  triage), one-click accelerometer calibration, and voltage/current meter
+  calibration with live readings to compare against a multimeter.
 - **Motors** — live motor output bars while connected, plus safety-gated
   single-motor spin and 4-motor voltage-sag comparison (flags outliers
   consistent with inter-turn shorts). Every test logged to local history.
@@ -119,8 +122,10 @@ npm start
   is itself a finding.
 - **Config / CLI** — one-click config backup (`diff all`), browse/download
   backups, gated CLI console (read commands free; writes need confirmation +
-  an existing backup; destructive commands refused), and backup **restore**
-  (replays a backup line-by-line and saves).
+  an existing backup; destructive commands refused), backup **restore**
+  (replays a backup line-by-line and saves), and a **config timeline**:
+  every write batch auto-snapshots the config first, and any two backups
+  diff against each other — "what changed since last session" in one click.
 - **Blackbox** — upload a .bbl/.bfl log. Sageflight parses the tuning state
   from the header AND decodes the binary flight frames (experimental):
   gyro noise spectra with peak detection, per-band RMS, motor
@@ -309,7 +314,9 @@ Local runtime data (config backups, staged firmware, test history) lives in
       validation across a corpus of real logs
 - [x] Parity wave 2: Ports editor + Presets browser (official BF repo)
 - [x] cots-catalog integration — hardware specs for the AI (search_catalog)
-- [ ] Parity wave 3: OSD editor, VTX tables, Power & battery calibration
+- [x] Parity wave 3: OSD editor, power & battery calibration, auto pre-write
+      snapshots + config timeline diffing
+- [ ] VTX tables editor
 - [ ] ESC settings write + flashing (Bluejay/AM32) — esc-configurator parity
 - [ ] Config timeline — auto-snapshot every change, "what changed since last
       session?" diffing across your fleet
