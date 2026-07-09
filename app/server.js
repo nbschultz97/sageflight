@@ -33,7 +33,7 @@ const {
 const catalog = require('../lib/catalog');
 const presets = require('../lib/presets');
 
-const VERSION = '0.6.0';
+const VERSION = '0.7.0';
 
 const app = express();
 app.use(cors());
@@ -1154,18 +1154,120 @@ app.post('/api/loadout/verify', (req, res) => {
 
 // ---------- Blackbox (header/settings + frame-level flight analysis) ----------
 const { parseHeaders, selectTuningSettings } = require('../lib/blackbox-header');
-const { analyzeBuffer, metricsForLlm } = require('../lib/blackbox-analyze');
+const { analyzeBuffer, metricsForLlm, trendPoint, groupLogsForTrends } = require('../lib/blackbox-analyze');
 
 // Frame-level analysis: gyro noise spectra, motor stats. CPU-bound for a few
-// seconds on big logs; results are computed on demand.
+// seconds on big logs; results are computed on demand and the compact
+// metrics cached for the cross-flight trends view.
 app.get('/api/blackbox/analyze/:name', (req, res) => {
   const buf = store.readBlackbox(req.params.name);
   if (!buf) return res.status(404).json({ ok: false, error: 'log not found' });
   try {
     const analysis = analyzeBuffer(buf);
+    try { store.saveBlackboxAnalysis(req.params.name, metricsForLlm(analysis)); } catch {}
     res.json({ ok: true, analysis });
   } catch (e) {
     res.status(422).json({ ok: false, error: `frame decode failed: ${e.message}` });
+  }
+});
+
+// ---------- Trends across a craft's flights (the AI tune coach) ----------
+
+function trendSeriesFor(logs) {
+  const points = [];
+  let missing = 0;
+  for (const l of logs) {
+    let metrics = store.readBlackboxAnalysis(l.name);
+    if (!metrics) {
+      // Analyze at most a few uncached logs inline — big logs take seconds.
+      if (missing < 4) {
+        try {
+          const buf = store.readBlackbox(l.name);
+          if (buf) {
+            metrics = metricsForLlm(analyzeBuffer(buf));
+            store.saveBlackboxAnalysis(l.name, metrics);
+          }
+        } catch {}
+      }
+      if (!metrics) { missing++; continue; }
+    }
+    const p = trendPoint(metrics);
+    if (p) points.push({ name: l.name, at: l.uploadedAt || null, ...p });
+  }
+  return { points, missing };
+}
+
+app.get('/api/blackbox/trends', (_req, res) => {
+  try {
+    const groups = groupLogsForTrends(store.listBlackboxes());
+    const crafts = [];
+    for (const [craft, logs] of groups) {
+      if (logs.length < 2) continue;
+      const { points, missing } = trendSeriesFor(logs);
+      if (points.length >= 2) crafts.push({ craft, flights: logs.length, points, missing });
+    }
+    res.json({ ok: true, crafts });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// AI trend review — reads the cached series and interprets the trajectory:
+// creeping noise = mechanical wear, rising rise-time = filter/battery drift.
+app.post('/api/blackbox/trends/review', async (req, res) => {
+  const { craft, model = 'llama3.1:8b' } = req.body || {};
+  sseHeaders(res);
+  try {
+    const groups = groupLogsForTrends(store.listBlackboxes());
+    const logs = groups.get(String(craft || ''));
+    if (!logs || logs.length < 2) { sseSend(res, { error: 'need at least two analyzed flights for this craft' }); return res.end(); }
+    const { points } = trendSeriesFor(logs);
+    if (points.length < 2) { sseSend(res, { error: 'not enough analyzable flights (decoder could not read them)' }); return res.end(); }
+
+    const prompt = [
+      `You are an FPV maintenance coach. Below are measured metrics from ${points.length} consecutive flights of the craft "${craft}", oldest first.`,
+      'gyro RMS in deg/s per axis (noise floor), dominant roll-axis spectral peak (Hz + ratio over floor),',
+      'step-response rise time in ms and overshoot % (roll/pitch), and motor output imbalance (max-min of motor averages).',
+      '',
+      JSON.stringify(points, null, 1).slice(0, 9000),
+      '',
+      'Interpret the TRAJECTORY, not single flights:',
+      '1. **Mechanical wear** — steadily rising gyro RMS or a growing spectral peak means bearings, prop damage, or loosening hardware. A peak that moved frequency suggests a changed prop or frame resonance shift.',
+      '2. **Tune drift** — rising rise-time or falling overshoot across flights with unchanged config suggests filter/battery aging; sudden step changes line up with config edits.',
+      '3. **Motor health** — a growing imbalance points at one deteriorating motor/prop corner.',
+      '4. **Verdict** — is this craft getting better, stable, or degrading? Give the top 2 concrete bench checks to do next, most likely culprit first.',
+      'Be direct, cite the numbers, and say if the data is too noisy/short to conclude anything.',
+    ].join('\n');
+
+    const r = await fetch(OLLAMA_HOST + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], stream: true }),
+    });
+    if (!r.ok || !r.body) throw new Error(`Ollama: ${r.status}`);
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf2 = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf2 += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf2.indexOf('\n')) !== -1) {
+        const line = buf2.slice(0, nl).trim();
+        buf2 = buf2.slice(nl + 1);
+        if (!line) continue;
+        try {
+          const chunk = JSON.parse(line);
+          if (chunk.message?.content) sseSend(res, { token: chunk.message.content });
+          if (chunk.done) { sseSend(res, { done: true }); res.end(); return; }
+        } catch {}
+      }
+    }
+    res.end();
+  } catch (e) {
+    sseSend(res, { error: e.message });
+    res.end();
   }
 });
 
@@ -1187,6 +1289,25 @@ app.post('/api/blackbox/upload', express.raw({ limit: '128mb', type: () => true 
 
 app.get('/api/blackbox/logs', (_req, res) => {
   res.json({ ok: true, logs: store.listBlackboxes() });
+});
+
+// ---------- Fleet timeline (per-board history across all local data) ----------
+const { buildFleet } = require('../lib/fleet');
+
+app.get('/api/fleet', (_req, res) => {
+  try {
+    res.json({
+      ok: true,
+      ...buildFleet({
+        backups: store.listBackups(),
+        logs: store.listBlackboxes(),
+        history: store.readHistory(50),
+        forensicUnits: forensic.listAllUnits(),
+      }),
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // ---------- Onboard dataflash: download logs straight off the FC ----------

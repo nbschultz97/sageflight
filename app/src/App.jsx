@@ -20,6 +20,7 @@ import ConfigTab from './components/ConfigTab';
 import ChecklistsTab from './components/ChecklistsTab';
 import ChatTab from './components/ChatTab';
 import BlackboxTab from './components/BlackboxTab';
+import FleetTab from './components/FleetTab';
 import FlashTab from './components/FlashTab';
 
 const TABS = [
@@ -38,6 +39,7 @@ const TABS = [
   { id: 'esc',        label: 'ESC',              icon: 'esc' },
   { id: 'config',     label: 'Config / CLI',     icon: 'config' },
   { id: 'blackbox',   label: 'Blackbox',         icon: 'blackbox' },
+  { id: 'fleet',      label: 'Fleet',            icon: 'fleet' },
   { id: 'checklists', label: 'Checklists',       icon: 'checklists' },
   { id: 'chat',       label: 'AI Assistant',     icon: 'chat', badge: 'LLM' },
   { id: 'div1',       divider: true },
@@ -69,6 +71,7 @@ export default function App() {
             {tab === 'esc'        && <EscTab />}
             {tab === 'config'     && <ConfigTab />}
             {tab === 'blackbox'   && <BlackboxTab />}
+            {tab === 'fleet'      && <FleetTab />}
             {tab === 'checklists' && <ChecklistsTab />}
             {tab === 'chat'       && <ChatTab />}
             {tab === 'flash'      && <FlashTab />}

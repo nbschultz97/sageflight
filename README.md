@@ -146,7 +146,13 @@ npm run dist       # build the Windows installer (desktop/release/)
   PIDtoolbox headline plot), and a **noise-vs-throttle heatmap** that
   separates motor/prop noise (climbs with throttle) from frame resonance
   (constant frequency). All charted, and fed to the AI so its tune review
-  cites measured numbers, not just settings.
+  cites measured numbers, not just settings. Logs come in by upload **or
+  straight off the FC's onboard flash** (MSP dataflash download + gated
+  erase), and a **tune coach** trends every craft across flights with an
+  AI read on the trajectory.
+- **Fleet** — every board this bench has touched: per-board timeline of
+  config backups and logs, one-click "what changed between sessions"
+  diffs, case-history records, and the bench activity feed.
 - **Checklists** — guided build → configuration → preflight checklists per
   airframe class (5" freestyle, cinewhoop, 7" long-range, whoop).
 - **AI Assistant** — offline LLM via Ollama with streaming, markdown, and a
@@ -357,8 +363,9 @@ Local runtime data (config backups, staged firmware, test history) lives in
 - [x] Cloud build support — Betaflight build API: pick target + release +
       protocols/features/defines, server-side compile, staged for flashing
       (verified live against build.betaflight.com)
-- [ ] Blackbox download from the FC — MSP dataflash read + erase, so the
-      whole tune loop (fly → download → analyze → fix) happens in one tool
+- [x] Blackbox download from the FC — MSP dataflash read (jumbo frames) +
+      token-gated erase; the whole fly → download → analyze → fix loop in
+      one tool (experimental until bench-validated)
 - [x] GPS + Failsafe tabs — stage 1/2 failsafe editor with plain-English
       consequences + GPS Rescue params; GPS module config (live sat status
       pending bench validation)
@@ -369,10 +376,12 @@ Local runtime data (config backups, staged firmware, test history) lives in
 
 ### Next — the AI moat (differentiation)
 
-- [ ] Fleet timeline — case history + config timeline across every board
-      you've ever plugged in: "what changed since it last flew well?"
-- [ ] AI tune coach over time — trend analysis across a craft's logs
-      (noise creeping up = bearings; rising sag = battery aging)
+- [x] Fleet timeline — every board's config history + logs on one screen,
+      with one-click diffs between sessions: "what changed since it last
+      flew well?"
+- [x] AI tune coach over time — cross-flight trend charts (noise RMS, step
+      response, motor imbalance) + AI trajectory review (creeping noise =
+      bearings; drifting rise time = filters/battery)
 - [ ] INAV-calibrated arming flags + INAV-aware AI prompts
 - [ ] ArduPilot / PX4 via MAVLink (own milestone: connection, params, arming checks)
 

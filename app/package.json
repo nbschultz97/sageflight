@@ -1,6 +1,6 @@
 {
   "name": "sageflight-app",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Sageflight web app - Betaflight-style AI configurator: Setup, Motors, ESC, Config, Checklists, AI Assistant, Firmware Flasher.",
   "type": "module",
   "private": true,

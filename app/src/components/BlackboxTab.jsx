@@ -200,6 +200,133 @@ function ThrottleHeatmapPanel({ heatmaps }) {
   );
 }
 
+// Cross-flight trends: the same craft's logs side by side. Rising noise =
+// mechanical wear; drifting step response = tune/battery aging. The AI reads
+// the trajectory and names the bench check to do next.
+function TrendsPanel({ logCount, model }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [review, setReview] = useState({}); // craft -> text
+  const [reviewing, setReviewing] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (logCount < 2) return;
+    setLoading(true);
+    fetch('/api/blackbox/trends').then(r => r.json()).then(j => {
+      if (j.ok) setData(j);
+      else setError(j.error);
+    }).catch(e => setError(e.message)).finally(() => setLoading(false));
+  }, [logCount]);
+
+  async function runReview(craft) {
+    setReviewing(craft); setError(null);
+    setReview(r => ({ ...r, [craft]: '' }));
+    try {
+      const res = await fetch('/api/blackbox/trends/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ craft, model }),
+      });
+      if (!res.ok || !res.body) throw new Error('review stream failed to open');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf('\n\n')) !== -1) {
+          const chunk = buf.slice(0, nl);
+          buf = buf.slice(nl + 2);
+          if (!chunk.startsWith('data:')) continue;
+          try {
+            const obj = JSON.parse(chunk.slice(5).trim());
+            if (obj.error) setError(obj.error);
+            if (obj.token) setReview(r => ({ ...r, [craft]: (r[craft] || '') + obj.token }));
+          } catch {}
+        }
+      }
+    } catch (e) { setError(e.message); }
+    finally { setReviewing(null); }
+  }
+
+  if (logCount < 2) return null;
+  if (!data && !loading && !error) return null;
+
+  return (
+    <section className="panel p-5 space-y-4">
+      <div className="text-xs uppercase tracking-wide text-stack-muted">Trends across flights (tune coach)</div>
+      {loading && <div className="text-sm text-stack-muted">analyzing flight history…</div>}
+      {error && <div className="text-sm text-stack-err">{error}</div>}
+      {data && data.crafts.length === 0 && (
+        <div className="text-sm text-stack-muted">
+          Need at least two decodable logs of the same craft (same craft name in the log header) to trend.
+        </div>
+      )}
+      {data?.crafts.map(c => (
+        <div key={c.craft} className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-sm">
+              <span className="font-mono font-semibold">{c.craft}</span>
+              <span className="text-stack-muted"> · {c.points.length} analyzed flight{c.points.length === 1 ? '' : 's'}{c.missing ? ` · ${c.missing} not decodable` : ''}</span>
+            </div>
+            <button className="btn-ghost text-sm" disabled={!!reviewing} onClick={() => runReview(c.craft)}>
+              {reviewing === c.craft ? 'Coaching…' : 'AI trend review'}
+            </button>
+          </div>
+          <TrendChart points={c.points} />
+          {review[c.craft] && (
+            <div className="chat-markdown text-sm bg-stack-bg border border-stack-border rounded p-4"
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(review[c.craft])) }} />
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function TrendChart({ points }) {
+  const W = 800, H = 130;
+  const n = points.length;
+  if (n < 2) return null;
+  const x = (i) => 30 + (i / (n - 1)) * (W - 60);
+  const series = [
+    { label: 'roll RMS', color: AXIS_COLORS.roll, vals: points.map(p => p.rms?.roll) },
+    { label: 'pitch RMS', color: AXIS_COLORS.pitch, vals: points.map(p => p.rms?.pitch) },
+    { label: 'imbalance', color: '#c9a86a', vals: points.map(p => p.motorImbalance) },
+  ].filter(s => s.vals.some(v => v != null));
+  const maxV = Math.max(1, ...series.flatMap(s => s.vals.filter(v => v != null)));
+  const y = (v) => H - 18 - (v / maxV) * (H - 34);
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full bg-stack-bg border border-stack-border rounded" preserveAspectRatio="none" style={{ height: 130 }}>
+        {series.map(s => (
+          <g key={s.label}>
+            <polyline fill="none" stroke={s.color} strokeWidth="1.4"
+              points={s.vals.map((v, i) => v != null ? `${x(i)},${y(v)}` : null).filter(Boolean).join(' ')} />
+            {s.vals.map((v, i) => v != null && <circle key={i} cx={x(i)} cy={y(v)} r="2.4" fill={s.color} />)}
+          </g>
+        ))}
+        {points.map((p, i) => (
+          <text key={i} x={x(i)} y={H - 4} fill="#9aa294" fontSize="9" fontFamily="monospace" textAnchor="middle">
+            {p.at ? p.at.slice(5, 10) : `#${i + 1}`}
+          </text>
+        ))}
+      </svg>
+      <div className="mt-1 flex gap-4 text-xs text-stack-muted">
+        {series.map(s => (
+          <span key={s.label} className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-0.5" style={{ background: s.color }} /> {s.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Pull logs straight off the FC's onboard flash chip over MSP — no more
 // Configurator side-trip in the fly → download → analyze loop. Read is
 // harmless; erase is irreversible and token-gated.
@@ -497,6 +624,8 @@ export default function BlackboxTab() {
       </section>
 
       <OnboardFlashPanel onDownloaded={async (name) => { await refresh(); open(name); }} />
+
+      <TrendsPanel logCount={logs.length} model={model} />
 
       {error && <div className="panel p-4 border-stack-err text-stack-err text-sm">{error}</div>}
 

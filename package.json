@@ -1,6 +1,6 @@
 {
   "name": "sageflight",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Sageflight - AI-native FPV configurator & troubleshooter. Betaflight-style UI with an offline LLM copilot: detects, diagnoses, configures, and flashes your stack. Standalone, offline-first.",
   "main": "help.js",
   "scripts": {

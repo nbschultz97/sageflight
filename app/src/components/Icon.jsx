@@ -130,6 +130,16 @@ const PATHS = {
       <path d="M7 16h2M11 16h2M15 16h2" />
     </>
   ),
+  // fleet / multiple quads
+  fleet: (
+    <>
+      <circle cx="7" cy="7" r="3" />
+      <circle cx="17" cy="7" r="3" />
+      <circle cx="7" cy="17" r="3" />
+      <circle cx="17" cy="17" r="3" />
+      <path d="M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6" />
+    </>
+  ),
   // firmware flash
   flash: (
     <>
