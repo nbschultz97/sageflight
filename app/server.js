@@ -180,6 +180,11 @@ app.post('/api/safety/confirm', (req, res) => {
     if (!acknowledged) {
       return res.status(400).json({ ok: false, error: 'Calibration requires acknowledged=true (quad level and still).' });
     }
+  } else if (action === 'blackbox.erase') {
+    // Wipes every flight log on the chip — irreversible.
+    if (!acknowledged) {
+      return res.status(400).json({ ok: false, error: 'Erase requires acknowledged=true (logs downloaded or not needed).' });
+    }
   } else {
     return res.status(400).json({ ok: false, error: `unknown action: ${action}` });
   }
@@ -1182,6 +1187,72 @@ app.post('/api/blackbox/upload', express.raw({ limit: '128mb', type: () => true 
 
 app.get('/api/blackbox/logs', (_req, res) => {
   res.json({ ok: true, logs: store.listBlackboxes() });
+});
+
+// ---------- Onboard dataflash: download logs straight off the FC ----------
+const dataflash = require('../lib/dataflash');
+
+app.get('/api/blackbox/flash/summary', async (_req, res) => {
+  const det = await detectFC();
+  if (det.type !== 'ALIVE') return res.status(400).json({ ok: false, error: `no FC on USB (${det.type})` });
+  try {
+    const summary = await serialOp(() => dataflash.readSummary(det.comPort));
+    res.json({ ok: true, summary });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Read the whole used flash over MSP jumbo frames and save it as a log.
+// Read-only and slow (minutes for a full chip over VCP) — progress via SSE.
+app.post('/api/blackbox/flash/download', async (_req, res) => {
+  sseHeaders(res);
+  const det = await detectFC();
+  if (det.type !== 'ALIVE') { sseSend(res, { error: `no FC on USB (${det.type})` }); return res.end(); }
+  try {
+    let lastPct = -1;
+    const { summary, data } = await serialOp(() => dataflash.downloadAll(det.comPort, ({ read, total }) => {
+      const pct = Math.floor((read / total) * 100);
+      if (pct !== lastPct) {
+        lastPct = pct;
+        sseSend(res, { stage: 'download', msg: `${Math.round(read / 1024)} / ${Math.round(total / 1024)} KB`, pct });
+      }
+    }));
+    if (data.length === 0) { sseSend(res, { error: 'dataflash is empty — nothing logged yet' }); return res.end(); }
+
+    const parsed = parseHeaders(data);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const meta = parsed
+      ? { firmware: parsed.firmware, board: parsed.board, craft: parsed.craft, logCount: parsed.logCount, source: 'dataflash' }
+      : { source: 'dataflash', headerless: true };
+    const { name } = store.saveBlackbox(`onboard-${stamp}.bbl`, data, meta);
+    store.appendHistory({ kind: 'blackbox.download', bytes: data.length, name, flashUsed: summary.usedSize });
+    sseSend(res, { done: true, name, bytes: data.length, ...meta });
+    res.end();
+  } catch (e) {
+    sseSend(res, { error: e.message });
+    res.end();
+  }
+});
+
+// Chip erase — irreversible, gated behind a blackbox.erase token.
+app.post('/api/blackbox/flash/erase', async (req, res) => {
+  const { token } = req.body || {};
+  sseHeaders(res);
+  if (!consumeToken(token, 'blackbox.erase')) { sseSend(res, { error: 'invalid or missing safety token' }); return res.end(); }
+  const det = await detectFC();
+  if (det.type !== 'ALIVE') { sseSend(res, { error: `no FC on USB (${det.type})` }); return res.end(); }
+  try {
+    const result = await serialOp(() => dataflash.eraseAll(det.comPort, ({ usedSize }) => {
+      sseSend(res, { stage: 'erase', msg: `erasing… ${Math.round(usedSize / 1024)} KB still reported` });
+    }));
+    store.appendHistory({ kind: 'blackbox.erase', totalSize: result.totalSize });
+    sseSend(res, { done: true, ...result });
+    res.end();
+  } catch (e) {
+    sseSend(res, { error: e.message });
+    res.end();
+  }
 });
 
 app.get('/api/blackbox/logs/:name', (req, res) => {

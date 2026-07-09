@@ -200,6 +200,162 @@ function ThrottleHeatmapPanel({ heatmaps }) {
   );
 }
 
+// Pull logs straight off the FC's onboard flash chip over MSP — no more
+// Configurator side-trip in the fly → download → analyze loop. Read is
+// harmless; erase is irreversible and token-gated.
+function OnboardFlashPanel({ onDownloaded }) {
+  const [summary, setSummary] = useState(null);
+  const [checking, setChecking] = useState(false);
+  const [busy, setBusy] = useState(null); // 'download' | 'erase'
+  const [progress, setProgress] = useState(null); // { msg, pct }
+  const [confirmErase, setConfirmErase] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function check() {
+    setChecking(true); setError(null); setSummary(null);
+    try {
+      const j = await (await fetch('/api/blackbox/flash/summary')).json();
+      if (!j.ok) throw new Error(j.error || 'summary failed');
+      setSummary(j.summary);
+    } catch (e) { setError(e.message); }
+    finally { setChecking(false); }
+  }
+
+  async function readSse(res, onEvent) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n\n')) !== -1) {
+        const chunk = buf.slice(0, nl);
+        buf = buf.slice(nl + 2);
+        if (!chunk.startsWith('data:')) continue;
+        try { onEvent(JSON.parse(chunk.slice(5).trim())); } catch {}
+      }
+    }
+  }
+
+  async function download() {
+    setBusy('download'); setError(null); setProgress({ msg: 'starting…', pct: 0 });
+    try {
+      const res = await fetch('/api/blackbox/flash/download', { method: 'POST' });
+      if (!res.ok || !res.body) throw new Error('download stream failed to open');
+      let saved = null;
+      await readSse(res, (obj) => {
+        if (obj.error) setError(obj.error);
+        else if (obj.done) saved = obj;
+        else if (obj.stage) setProgress({ msg: obj.msg, pct: obj.pct ?? null });
+      });
+      if (saved) {
+        setProgress({ msg: `saved ${saved.name} (${Math.round(saved.bytes / 1024)} KB)`, pct: 100 });
+        await check();
+        await onDownloaded(saved.name);
+      }
+    } catch (e) { setError(e.message); }
+    finally { setBusy(null); }
+  }
+
+  async function erase() {
+    setConfirmErase(false); setBusy('erase'); setError(null); setProgress({ msg: 'requesting erase…', pct: null });
+    try {
+      const tr = await fetch('/api/safety/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'blackbox.erase', acknowledged: true }),
+      });
+      const tj = await tr.json();
+      if (!tj.ok) throw new Error(tj.error || 'token refused');
+      const res = await fetch('/api/blackbox/flash/erase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: tj.token }),
+      });
+      if (!res.ok || !res.body) throw new Error('erase stream failed to open');
+      let done = false;
+      await readSse(res, (obj) => {
+        if (obj.error) setError(obj.error);
+        else if (obj.done) done = true;
+        else if (obj.stage) setProgress({ msg: obj.msg, pct: null });
+      });
+      if (done) { setProgress({ msg: 'chip erased', pct: null }); await check(); }
+    } catch (e) { setError(e.message); }
+    finally { setBusy(null); }
+  }
+
+  const usedKb = summary ? Math.round(summary.usedSize / 1024) : 0;
+
+  return (
+    <section className="panel p-5 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-stack-muted">Onboard flash (download from FC)</div>
+          <div className="text-xs text-stack-muted mt-1">
+            Reads the blackbox flash chip over MSP — experimental until bench-validated.
+          </div>
+        </div>
+        <button className="btn-ghost text-sm" disabled={checking || !!busy} onClick={check}>
+          {checking ? 'Checking…' : 'Check flash'}
+        </button>
+      </div>
+
+      {summary && (
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          {!summary.supported && <span className="pill-muted">no onboard flash on this FC</span>}
+          {summary.supported && (
+            <>
+              <span className={summary.ready ? 'pill-ok' : 'pill-warn'}>{summary.ready ? 'ready' : 'busy'}</span>
+              <span className="font-mono text-xs text-stack-muted">
+                {usedKb} KB used of {Math.round(summary.totalSize / 1024 / 1024)} MB
+                {summary.totalSize > 0 ? ` (${Math.round((summary.usedSize / summary.totalSize) * 100)}%)` : ''}
+              </span>
+              <button className={summary.usedSize > 0 && !busy ? 'btn-primary text-sm' : 'btn-ghost text-sm opacity-50 cursor-not-allowed'}
+                disabled={summary.usedSize === 0 || !!busy} onClick={download}>
+                {busy === 'download' ? 'Downloading…' : 'Download logs'}
+              </button>
+              <button className="text-stack-err hover:underline text-sm" disabled={!!busy}
+                onClick={() => setConfirmErase(true)}>
+                {busy === 'erase' ? 'Erasing…' : 'Erase chip'}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {progress && (
+        <div className="text-xs font-mono text-stack-muted flex items-center gap-3">
+          {progress.pct != null && (
+            <div className="w-40 h-1.5 bg-stack-bg border border-stack-border rounded overflow-hidden">
+              <div className="h-full bg-stack-accent" style={{ width: `${progress.pct}%` }} />
+            </div>
+          )}
+          <span>{progress.msg}</span>
+        </div>
+      )}
+      {error && <div className="text-sm text-stack-err">{error}</div>}
+
+      {confirmErase && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="panel p-6 max-w-lg w-full">
+            <h2 className="text-xl font-semibold text-stack-warn">⚠ Erase onboard flash</h2>
+            <p className="text-sm text-stack-muted mt-2">
+              Every flight log on the chip ({usedKb} KB) is gone forever. Download first if you want them.
+              The erase takes up to a minute — don't unplug.
+            </p>
+            <div className="mt-5 flex gap-3 justify-end">
+              <button className="btn-ghost" onClick={() => setConfirmErase(false)}>Cancel</button>
+              <button className="btn-primary" onClick={erase}>Logs are safe — erase it</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function BlackboxTab() {
   const [logs, setLogs] = useState([]);
   const [selected, setSelected] = useState(null); // { name, firmware, craft, tuning, ... }
@@ -339,6 +495,8 @@ export default function BlackboxTab() {
           </div>
         )}
       </section>
+
+      <OnboardFlashPanel onDownloaded={async (name) => { await refresh(); open(name); }} />
 
       {error && <div className="panel p-4 border-stack-err text-stack-err text-sm">{error}</div>}
 
