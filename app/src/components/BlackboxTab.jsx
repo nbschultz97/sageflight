@@ -8,6 +8,13 @@ import DOMPurify from 'dompurify';
 // question PIDtoolbox never answered.)
 const AXIS_COLORS = { roll: '#e05d52', pitch: '#79c26d', yaw: '#6ba3d6' };
 
+// Chart chrome colors sourced from the Tailwind `stack` palette (see tailwind.config.js)
+// so diagnostic-chart axes/gridlines track the app theme instead of one-off hex literals.
+// SVG stroke/fill can't consume Tailwind classes, so we reference the token values here.
+const CHART_GRID = '#454d43';      // stack.border — gridlines & zero baseline
+const CHART_AXIS_TEXT = '#9aa294'; // stack.muted  — axis tick labels
+const CHART_REF_LINE = '#9aa294';  // stack.muted  — reference line (matches its label)
+
 function FlightAnalysis({ a }) {
   return (
     <div className="mb-4 space-y-4">
@@ -86,6 +93,7 @@ function FlightAnalysis({ a }) {
 }
 
 function SpectrumChart({ axes }) {
+  const id = React.useId();
   const W = 800, H = 180;
   const series = axes.filter(g => g.available && g.spectrum?.length);
   if (series.length === 0) return null;
@@ -96,11 +104,18 @@ function SpectrumChart({ axes }) {
 
   return (
     <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full bg-stack-bg border border-stack-border rounded" preserveAspectRatio="none" style={{ height: 180 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full bg-stack-bg border border-stack-border rounded" preserveAspectRatio="none" style={{ height: 180 }}
+        role="img" aria-labelledby={`${id}-t ${id}-d`}>
+        <title id={`${id}-t`}>Gyro noise spectrum</title>
+        <desc id={`${id}-d`}>
+          Line chart of gyro noise amplitude (degrees per second, vertical axis, square-root scaled)
+          versus frequency (hertz, horizontal axis, 0 to {Math.round(maxF)} Hz). One line per axis:
+          {' '}{series.map(g => g.axis).join(', ')}.
+        </desc>
         {[100, 200, 300, 400, 500].filter(f => f < maxF).map(f => (
           <g key={f}>
-            <line x1={x(f)} y1="0" x2={x(f)} y2={H} stroke="#454d43" strokeWidth="0.5" />
-            <text x={x(f) + 3} y="12" fill="#9aa294" fontSize="10" fontFamily="monospace">{f}Hz</text>
+            <line x1={x(f)} y1="0" x2={x(f)} y2={H} stroke={CHART_GRID} strokeWidth="0.5" />
+            <text x={x(f) + 3} y="12" fill={CHART_AXIS_TEXT} fontSize="10" fontFamily="monospace">{f}Hz</text>
           </g>
         ))}
         {series.map(g => (
@@ -113,6 +128,7 @@ function SpectrumChart({ axes }) {
 }
 
 function StepResponseChart({ series }) {
+  const id = React.useId();
   const W = 800, H = 180;
   const avail = series.filter(sr => sr.available && sr.points?.length);
   if (avail.length === 0) return null;
@@ -123,14 +139,21 @@ function StepResponseChart({ series }) {
   const y = (v) => H - 8 - ((v - minV) / (maxV - minV)) * (H - 20);
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full bg-stack-bg border border-stack-border rounded" preserveAspectRatio="none" style={{ height: 180 }}>
-      <line x1="0" y1={y(1)} x2={W} y2={y(1)} stroke="#6a7266" strokeWidth="0.7" strokeDasharray="5 4" />
-      <text x="4" y={y(1) - 4} fill="#9aa294" fontSize="10" fontFamily="monospace">1.0</text>
-      <line x1="0" y1={y(0)} x2={W} y2={y(0)} stroke="#454d43" strokeWidth="0.5" />
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full bg-stack-bg border border-stack-border rounded" preserveAspectRatio="none" style={{ height: 180 }}
+      role="img" aria-labelledby={`${id}-t ${id}-d`}>
+      <title id={`${id}-t`}>Step response</title>
+      <desc id={`${id}-d`}>
+        Line chart of normalized gyro response (vertical axis, where 1.0 marked by the dashed line is
+        perfect setpoint tracking) versus time after a setpoint step (milliseconds, horizontal axis,
+        0 to {Math.round(maxT)} ms). One line per axis: {avail.map(sr => sr.axis).join(', ')}.
+      </desc>
+      <line x1="0" y1={y(1)} x2={W} y2={y(1)} stroke={CHART_REF_LINE} strokeWidth="0.7" strokeDasharray="5 4" />
+      <text x="4" y={y(1) - 4} fill={CHART_AXIS_TEXT} fontSize="10" fontFamily="monospace">1.0</text>
+      <line x1="0" y1={y(0)} x2={W} y2={y(0)} stroke={CHART_GRID} strokeWidth="0.5" />
       {[100, 200, 300, 400].filter(t => t < maxT).map(t => (
         <g key={t}>
-          <line x1={x(t)} y1="0" x2={x(t)} y2={H} stroke="#454d43" strokeWidth="0.5" />
-          <text x={x(t) + 3} y={H - 4} fill="#9aa294" fontSize="10" fontFamily="monospace">{t}ms</text>
+          <line x1={x(t)} y1="0" x2={x(t)} y2={H} stroke={CHART_GRID} strokeWidth="0.5" />
+          <text x={x(t) + 3} y={H - 4} fill={CHART_AXIS_TEXT} fontSize="10" fontFamily="monospace">{t}ms</text>
         </g>
       ))}
       {avail.map(sr => (
@@ -152,6 +175,7 @@ function heatColor(v) {
 
 function ThrottleHeatmapPanel({ heatmaps }) {
   const [axis, setAxis] = React.useState('roll');
+  const id = React.useId();
   const hm = heatmaps.find(h => h.axis === axis && h.available) || heatmaps.find(h => h.available);
   if (!hm) return null;
 
@@ -177,18 +201,25 @@ function ThrottleHeatmapPanel({ heatmaps }) {
           ))}
         </div>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full bg-stack-bg border border-stack-border rounded" preserveAspectRatio="none" style={{ height: 220 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full bg-stack-bg border border-stack-border rounded" preserveAspectRatio="none" style={{ height: 220 }}
+        role="img" aria-labelledby={`${id}-t ${id}-d`}>
+        <title id={`${id}-t`}>Noise versus throttle heatmap ({hm.axis} axis)</title>
+        <desc id={`${id}-d`}>
+          Heatmap of {hm.axis}-axis gyro noise. Horizontal axis is frequency (hertz); vertical axis is
+          throttle (0 to 100 percent). Brighter cells are higher noise on a log-normalized scale; gray
+          rows are throttle bands that were never flown.
+        </desc>
         {hm.matrix.map((row, t) => row && row.map((v, f) => (
           <rect key={`${t}-${f}`} x={padL + f * cw} y={H - padB - (t + 1) * ch}
             width={cw + 0.5} height={ch + 0.5} fill={heatColor(norm(v))} />
         )))}
         {[0, 25, 50, 75, 100].map(p => (
-          <text key={p} x="2" y={H - padB - (p / 100) * (H - padB) + 4} fill="#9aa294" fontSize="9" fontFamily="monospace">{p}%</text>
+          <text key={p} x="2" y={H - padB - (p / 100) * (H - padB) + 4} fill={CHART_AXIS_TEXT} fontSize="9" fontFamily="monospace">{p}%</text>
         ))}
         {[100, 200, 300, 400, 500].filter(f => f < hm.freqs[FB - 1]).map(f => {
           const fi = hm.freqs.findIndex(x => x >= f);
           return fi > 0 ? (
-            <text key={f} x={padL + fi * cw} y={H - 5} fill="#9aa294" fontSize="9" fontFamily="monospace">{f}Hz</text>
+            <text key={f} x={padL + fi * cw} y={H - 5} fill={CHART_AXIS_TEXT} fontSize="9" fontFamily="monospace">{f}Hz</text>
           ) : null;
         })}
       </svg>
@@ -288,21 +319,30 @@ function TrendsPanel({ logCount, model }) {
 }
 
 function TrendChart({ points }) {
+  const id = React.useId();
   const W = 800, H = 130;
   const n = points.length;
   if (n < 2) return null;
   const x = (i) => 30 + (i / (n - 1)) * (W - 60);
   const series = [
-    { label: 'roll RMS', color: AXIS_COLORS.roll, vals: points.map(p => p.rms?.roll) },
-    { label: 'pitch RMS', color: AXIS_COLORS.pitch, vals: points.map(p => p.rms?.pitch) },
-    { label: 'imbalance', color: '#c9a86a', vals: points.map(p => p.motorImbalance) },
+    { label: 'roll RMS', unit: '°/s', color: AXIS_COLORS.roll, vals: points.map(p => p.rms?.roll) },
+    { label: 'pitch RMS', unit: '°/s', color: AXIS_COLORS.pitch, vals: points.map(p => p.rms?.pitch) },
+    { label: 'imbalance', unit: 'throttle spread', color: '#c9a86a', vals: points.map(p => p.motorImbalance) },
   ].filter(s => s.vals.some(v => v != null));
   const maxV = Math.max(1, ...series.flatMap(s => s.vals.filter(v => v != null)));
   const y = (v) => H - 18 - (v / maxV) * (H - 34);
 
   return (
     <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full bg-stack-bg border border-stack-border rounded" preserveAspectRatio="none" style={{ height: 130 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full bg-stack-bg border border-stack-border rounded" preserveAspectRatio="none" style={{ height: 130 }}
+        role="img" aria-labelledby={`${id}-t ${id}-d`}>
+        <title id={`${id}-t`}>Cross-flight trend</title>
+        <desc id={`${id}-d`}>
+          Line chart tracking {series.map(s => `${s.label} (${s.unit})`).join(', ')} across {n} flights
+          (horizontal axis). Each series is scaled to a shared 0 to {maxV} range and shares one unitless
+          vertical axis, so each line shows its own trend over time; heights are not comparable between
+          series because they carry different units.
+        </desc>
         {series.map(s => (
           <g key={s.label}>
             <polyline fill="none" stroke={s.color} strokeWidth="1.4"
@@ -311,17 +351,21 @@ function TrendChart({ points }) {
           </g>
         ))}
         {points.map((p, i) => (
-          <text key={i} x={x(i)} y={H - 4} fill="#9aa294" fontSize="9" fontFamily="monospace" textAnchor="middle">
+          <text key={i} x={x(i)} y={H - 4} fill={CHART_AXIS_TEXT} fontSize="9" fontFamily="monospace" textAnchor="middle">
             {p.at ? p.at.slice(5, 10) : `#${i + 1}`}
           </text>
         ))}
       </svg>
-      <div className="mt-1 flex gap-4 text-xs text-stack-muted">
+      <div className="mt-1 flex flex-wrap gap-4 text-xs text-stack-muted">
         {series.map(s => (
           <span key={s.label} className="flex items-center gap-1.5">
-            <span className="inline-block w-3 h-0.5" style={{ background: s.color }} /> {s.label}
+            <span className="inline-block w-3 h-0.5" style={{ background: s.color }} /> {s.label} ({s.unit})
           </span>
         ))}
+      </div>
+      <div className="mt-1 text-xs text-stack-muted">
+        Vertical axis is normalized to a shared 0–{maxV} scale (unitless): each line tracks its own trend
+        across flights. Heights are not comparable between series — they carry different units.
       </div>
     </div>
   );

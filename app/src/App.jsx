@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { TelemetryProvider } from './telemetry';
+import { DirtyProvider, useDirty } from './dirty';
 import Sidebar from './components/Sidebar';
 import HeaderBar from './components/HeaderBar';
 import StatusBar from './components/StatusBar';
@@ -47,14 +48,34 @@ const TABS = [
 ];
 
 export default function App() {
-  const [tab, setTab] = useState('detect');
-
   return (
     <TelemetryProvider>
+      <DirtyProvider>
+        <AppShell />
+      </DirtyProvider>
+    </TelemetryProvider>
+  );
+}
+
+function AppShell() {
+  const [tab, setTab] = useState('detect');
+  const { isDirty } = useDirty();
+
+  // Tabs are conditionally mounted, so switching away from a dirty tab would
+  // silently drop its pending edits. Confirm before leaving; stay on cancel.
+  const selectTab = (next) => {
+    if (next !== tab && isDirty(tab) &&
+        !window.confirm('You have unsaved changes — leave anyway?')) {
+      return;
+    }
+    setTab(next);
+  };
+
+  return (
       <div className="flex flex-col h-full">
         <HeaderBar />
         <div className="flex-1 flex min-h-0">
-          <Sidebar tabs={TABS} active={tab} onSelect={setTab} />
+          <Sidebar tabs={TABS} active={tab} onSelect={selectTab} />
           <main className="flex-1 overflow-auto p-6 min-w-0">
             {tab === 'detect'     && <DetectTab />}
             {tab === 'receiver'   && <ReceiverTab />}
@@ -79,6 +100,5 @@ export default function App() {
         </div>
         <StatusBar />
       </div>
-    </TelemetryProvider>
   );
 }

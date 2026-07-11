@@ -44,6 +44,7 @@ export default function ChatTab() {
   const [agentMode, setAgentMode] = useState(() => localStorage.getItem('st:chat:agent') !== '0');
   const [includeContext, setIncludeContext] = useState(true);
   const [applyConfirm, setApplyConfirm] = useState(null); // message index pending apply
+  const [confirmClear, setConfirmClear] = useState(false); // clear-history confirmation gate
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -206,6 +207,7 @@ export default function ChatTab() {
     setMessages([]);
     localStorage.removeItem(STORAGE_KEY);
     setError(null);
+    setConfirmClear(false);
   }
 
   const hasScan = (() => {
@@ -251,7 +253,7 @@ export default function ChatTab() {
           hint={hasScan ? 'Include your last FC scan in the conversation' : 'Run a scan in the Setup tab first'}
         />
         {messages.length > 0 && (
-          <button onClick={clearChat} className="text-stack-muted hover:text-stack-err ml-auto">clear chat</button>
+          <button onClick={() => setConfirmClear(true)} className="text-stack-muted hover:text-stack-err ml-auto">clear chat</button>
         )}
       </div>
 
@@ -307,12 +309,15 @@ export default function ChatTab() {
       {error && <div className="panel p-3 border-stack-err text-stack-err text-sm">{error}</div>}
 
       <form onSubmit={e => { e.preventDefault(); send(); }} className="flex gap-2">
+        <label htmlFor="chat-composer" className="sr-only">Message to the AI assistant</label>
         <input
+          id="chat-composer"
+          aria-label="Message to the AI assistant"
           value={draft}
           onChange={e => setDraft(e.target.value)}
           placeholder={ollama?.ok ? (agentMode ? 'Ask — the AI can inspect your FC and propose fixes…' : 'Ask about your build…') : 'Ollama not reachable — check status above'}
           disabled={!ollama?.ok || streaming}
-          className="flex-1 bg-stack-panel border border-stack-border rounded px-4 py-2.5 font-sans outline-none focus:border-stack-accent disabled:opacity-50"
+          className="flex-1 bg-stack-panel border border-stack-border rounded px-4 py-2.5 font-sans outline-none focus:border-stack-accent focus-visible:border-stack-accent focus-visible:ring-2 focus-visible:ring-stack-accent focus-visible:ring-offset-2 focus-visible:ring-offset-stack-bg disabled:opacity-50"
         />
         <button type="submit" disabled={!ollama?.ok || streaming || !draft.trim()}
           className={(ollama?.ok && !streaming && draft.trim()) ? 'btn-primary' : 'btn-ghost opacity-50'}>
@@ -320,24 +325,52 @@ export default function ChatTab() {
         </button>
       </form>
 
-      {applyConfirm != null && (
+      {applyConfirm != null && (() => {
+        const pending = messages[applyConfirm]?.proposal;
+        const cmds = pending?.commands || [];
+        return (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+            <div className="panel p-6 max-w-lg w-full">
+              <h2 className="text-xl font-semibold text-stack-warn">⚠ Apply AI-proposed config</h2>
+              <p className="text-sm text-stack-muted mt-2">
+                The exact commands below will be written to the flight controller —
+                a wrong value can make the aircraft unflyable or unsafe. Confirm they are what you intend.
+              </p>
+              <div className="mt-3 border border-stack-border rounded bg-stack-bg">
+                <div className="px-3 py-1.5 border-b border-stack-border text-xs uppercase tracking-wide text-stack-muted">
+                  {cmds.length} command{cmds.length === 1 ? '' : 's'} to apply
+                </div>
+                <pre className="px-3 py-2 text-xs font-mono whitespace-pre-wrap text-stack-text max-h-52 overflow-y-auto">
+                  {cmds.join('\n')}
+                </pre>
+              </div>
+              {!hasBackup && (
+                <p className="text-sm text-stack-err mt-3">No config backup exists yet — take one in the Config tab first.</p>
+              )}
+              <div className="mt-6 flex gap-3 justify-end">
+                <button className="btn-ghost" onClick={() => setApplyConfirm(null)}>Cancel</button>
+                <button
+                  className={hasBackup ? 'btn-primary' : 'btn-ghost opacity-50 cursor-not-allowed'}
+                  disabled={!hasBackup}
+                  onClick={() => applyProposal(applyConfirm)}
+                >I have a backup — apply it</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {confirmClear && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="panel p-6 max-w-lg w-full">
-            <h2 className="text-xl font-semibold text-stack-warn">⚠ Apply AI-proposed config</h2>
+          <div className="panel p-6 max-w-md w-full">
+            <h2 className="text-xl font-semibold text-stack-warn">Clear chat history?</h2>
             <p className="text-sm text-stack-muted mt-2">
-              These commands will be written to the flight controller. Review them in the card —
-              a wrong value can make the aircraft unflyable or unsafe.
+              This permanently deletes {messages.length} saved message{messages.length === 1 ? '' : 's'} from
+              this browser. It cannot be undone.
             </p>
-            {!hasBackup && (
-              <p className="text-sm text-stack-err mt-3">No config backup exists yet — take one in the Config tab first.</p>
-            )}
             <div className="mt-6 flex gap-3 justify-end">
-              <button className="btn-ghost" onClick={() => setApplyConfirm(null)}>Cancel</button>
-              <button
-                className={hasBackup ? 'btn-primary' : 'btn-ghost opacity-50 cursor-not-allowed'}
-                disabled={!hasBackup}
-                onClick={() => applyProposal(applyConfirm)}
-              >I have a backup — apply it</button>
+              <button className="btn-ghost" onClick={() => setConfirmClear(false)}>Cancel</button>
+              <button className="btn-primary" onClick={clearChat}>Clear history</button>
             </div>
           </div>
         </div>

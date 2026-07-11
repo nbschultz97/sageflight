@@ -3,6 +3,7 @@ import SafetyModal from './SafetyModal';
 import { useTelemetry } from '../telemetry';
 
 export default function MotorsTab() {
+  const { connected } = useTelemetry();
   const [modal, setModal] = useState(null); // { action, onToken }
   const [spinning, setSpinning] = useState(false);
   const [singleResult, setSingleResult] = useState(null);
@@ -100,20 +101,24 @@ export default function MotorsTab() {
 
       <section className="grid md:grid-cols-2 gap-4">
         <button
-          disabled={spinning}
+          disabled={!connected || spinning}
           onClick={() => openSafety('motor.spin', spinOne)}
-          className={!spinning ? 'btn-primary py-5 text-base' : 'btn-ghost py-5 text-base opacity-50 cursor-not-allowed'}
+          className={connected && !spinning ? 'btn-primary py-5 text-base' : 'btn-ghost py-5 text-base opacity-50 cursor-not-allowed'}
         >
           {spinning ? 'Spinning…' : `Spin Motor ${selectedMotor}`}
         </button>
         <button
-          disabled={spinning}
+          disabled={!connected || spinning}
           onClick={() => openSafety('motor.compare', runCompare)}
-          className={!spinning ? 'btn-primary py-5 text-base' : 'btn-ghost py-5 text-base opacity-50 cursor-not-allowed'}
+          className={connected && !spinning ? 'btn-primary py-5 text-base' : 'btn-ghost py-5 text-base opacity-50 cursor-not-allowed'}
         >
           {spinning ? 'Spinning…' : 'Compare All 4 Motors'}
         </button>
       </section>
+
+      {!connected && (
+        <div className="text-sm text-stack-muted">Connect a flight controller first.</div>
+      )}
 
       {error && <div className="panel p-4 border-stack-err text-stack-err text-sm">{error}</div>}
 

@@ -36,3 +36,18 @@ body { @apply bg-stack-bg text-stack-text; }
 .chat-markdown th,
 .chat-markdown td       { @apply border border-stack-border px-2 py-1; }
 .chat-markdown blockquote { @apply border-l-2 border-stack-accent/50 pl-3 text-stack-muted my-2; }
+
+/* Consistent keyboard focus: a clear sage-accent ring on every interactive
+   control. Element+pseudo-class selectors here outrank Tailwind's .outline-none
+   (`outline: 2px solid transparent`), so focus stays visible even where a
+   component sets outline-none. Layered on top of existing hover/transition. */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid theme('colors.stack.accent');
+  outline-offset: 2px;
+}

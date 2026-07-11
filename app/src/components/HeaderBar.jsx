@@ -63,19 +63,19 @@ export default function HeaderBar() {
   const canConnect = detection?.type === 'ALIVE' || connected || suspended;
 
   return (
-    <header className="h-14 bg-stack-header border-b border-stack-border px-4 flex items-center justify-between shrink-0">
-      <div className="flex items-center gap-3">
+    <header className="min-h-14 bg-stack-header border-b border-stack-border px-3 sm:px-4 py-2 flex flex-wrap items-center gap-x-4 gap-y-2 shrink-0">
+      <div className="flex min-w-0 items-center gap-3">
         <img src="/sageflight-logo.svg" alt="Sageflight" className="w-8 h-8 rounded-md shrink-0" />
-        <div className="flex items-baseline gap-3">
-          <div className="font-mono font-bold text-lg leading-none">
+        <div className="flex min-w-0 items-baseline gap-3">
+          <div className="shrink-0 font-mono font-bold text-base sm:text-lg leading-none">
             <span className="text-stack-accent">SAGE</span>
             <span className="text-stack-text">FLIGHT</span>
           </div>
-          <div className="font-mono text-[11px] text-stack-muted">AI-native configurator &amp; troubleshooter · v0.7</div>
+          <div className="hidden lg:block truncate font-mono text-[11px] text-stack-muted">AI-native configurator &amp; troubleshooter · v0.7</div>
         </div>
       </div>
 
-      <div className="flex items-center gap-3 text-sm">
+      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3 text-xs sm:text-sm">
         {ollama && (
           <span className={ollama.ok ? 'pill-ok' : 'pill-muted'} title={ollama.ok ? `Ollama at ${ollama.host}` : 'Ollama offline — AI Assistant disabled'}>
             AI {ollama.ok ? 'ready' : 'offline'}
@@ -86,7 +86,7 @@ export default function HeaderBar() {
           onClick={toggleConnection}
           disabled={busy || !canConnect}
           className={[
-            'btn text-sm font-semibold',
+            'btn shrink-0 text-xs sm:text-sm font-semibold',
             (connected || suspended)
               ? 'border border-stack-accent text-stack-accent hover:bg-stack-accent/10'
               : canConnect ? 'bg-stack-accent text-stack-header hover:brightness-110' : 'border border-stack-border text-stack-muted opacity-50 cursor-not-allowed',

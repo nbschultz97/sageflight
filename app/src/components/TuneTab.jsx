@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { useDirty } from '../dirty';
 
 // PID / rates / filters editor — Betaflight's PID Tuning tab, with an AI
 // reviewer instead of guesswork. Values load via CLI `dump`; changed values
@@ -23,6 +24,13 @@ export default function TuneTab() {
   const [review, setReview] = useState('');
   const [reviewing, setReviewing] = useState(false);
   const [error, setError] = useState(null);
+  // Real backup gate for the confirm dialog: a write is only allowed once a
+  // config backup actually exists (found on the server or taken here).
+  const [backupOk, setBackupOk] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupInfo, setBackupInfo] = useState(null); // { id, board }
+  const [backupErr, setBackupErr] = useState(null);
+  const { setDirty } = useDirty();
   const model = localStorage.getItem('st:chat:model') || 'llama3.1:8b';
 
   async function load() {
@@ -43,18 +51,54 @@ export default function TuneTab() {
   const changed = Object.fromEntries(Object.entries(edits).filter(([k, v]) => String(v) !== String(flat[k]) && v !== ''));
   const changedCount = Object.keys(changed).length;
 
+  // Report unsaved edits so switching tabs warns instead of silently dropping
+  // them. load() clears edits (on mount, re-read, and post-save) which zeroes
+  // changedCount; the cleanup clears the flag on unmount.
+  useEffect(() => {
+    setDirty('tune', changedCount > 0);
+    return () => setDirty('tune', false);
+  }, [changedCount, setDirty]);
+
+  // When the confirm dialog opens, verify against the server whether a real
+  // backup exists, so the "I have a backup" claim reflects reality.
+  useEffect(() => {
+    if (!confirm) return;
+    let cancelled = false;
+    setBackupOk(false); setBackupInfo(null); setBackupErr(null);
+    (async () => {
+      try {
+        const j = await (await fetch('/api/config/backups')).json();
+        if (!cancelled && j.ok && Array.isArray(j.backups) && j.backups.length) setBackupOk(true);
+      } catch { /* leave the gate closed; user can take one now */ }
+    })();
+    return () => { cancelled = true; };
+  }, [confirm]);
+
   function setVal(key, value) {
     setEdits(e => ({ ...e, [key]: value }));
   }
 
+  async function takeBackupNow() {
+    setBackupBusy(true); setBackupErr(null);
+    try {
+      const r = await fetch('/api/config/backup', { method: 'POST' });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || 'backup failed');
+      setBackupOk(true);
+      setBackupInfo({ id: j.id, board: j.boardName });
+    } catch (e) { setBackupErr(e.message); }
+    finally { setBackupBusy(false); }
+  }
+
   async function apply() {
+    if (!backupOk) return; // never write, or claim a backup, without one
     setConfirm(false); setApplying(true); setError(null);
     try {
       const commands = [...Object.entries(changed).map(([k, v]) => `set ${k} = ${v}`), 'save'];
       const tr = await fetch('/api/safety/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'config.write', acknowledged: true, backupTaken: true }),
+        body: JSON.stringify({ action: 'config.write', acknowledged: true, backupTaken: backupOk }),
       });
       const tj = await tr.json();
       if (!tj.ok) throw new Error(tj.error || 'token refused');
@@ -218,9 +262,26 @@ export default function TuneTab() {
               {Object.entries(changed).map(([k, v]) => `set ${k} = ${v}`).join('\n') + '\nsave'}
             </pre>
             <p className="text-sm text-stack-muted mt-2">The FC saves and reboots. Bad filter/PID values can make the aircraft dangerous — have a config backup.</p>
+
+            <div className="mt-4 flex items-center justify-between gap-3 bg-stack-bg border border-stack-border rounded p-3">
+              <div className="text-sm">
+                {backupOk
+                  ? <span className="text-stack-ok">✓ Config backup ready{backupInfo ? ` — ${backupInfo.id}` : ''}</span>
+                  : <span className="text-stack-err">No config backup yet — take one before writing.</span>}
+              </div>
+              <button
+                className={backupBusy ? 'btn-ghost text-sm opacity-50 cursor-not-allowed' : 'btn-ghost text-sm shrink-0'}
+                disabled={backupBusy} onClick={takeBackupNow}>
+                {backupBusy ? 'Backing up…' : 'Take backup now'}
+              </button>
+            </div>
+            {backupErr && <p className="text-sm text-stack-err mt-2">{backupErr}</p>}
+
             <div className="mt-5 flex gap-3 justify-end">
               <button className="btn-ghost" onClick={() => setConfirm(false)}>Cancel</button>
-              <button className="btn-primary" onClick={apply}>I have a backup — write it</button>
+              <button
+                className={backupOk ? 'btn-primary' : 'btn-primary opacity-50 cursor-not-allowed'}
+                disabled={!backupOk} onClick={apply}>I have a backup — write it</button>
             </div>
           </div>
         </div>

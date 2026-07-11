@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sageflight — AI-native FPV configurator &amp; troubleshooter</title>
-<meta name="description" content="Betaflight-style configurator on steroids: live telemetry, arming doctor, ESC interrogation, safe firmware flashing, and an offline LLM copilot. No cloud, no data exfil.">
+<meta name="description" content="Sageflight diagnoses FPV problems, explains them in plain language, and applies exact fixes safely — offline, human-approved, and built for the bench.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 240'%3E%3Crect width='240' height='240' rx='48' fill='%230e1210'/%3E%3Ccircle cx='120' cy='120' r='86' fill='none' stroke='%239dc08b' stroke-width='10'/%3E%3Cline x1='52' y1='120' x2='84' y2='120' stroke='%23e0b458' stroke-width='8' stroke-linecap='round'/%3E%3Cline x1='156' y1='120' x2='188' y2='120' stroke='%23e0b458' stroke-width='8' stroke-linecap='round'/%3E%3Cpath d='M120 54 C152 86 154 130 120 180 C86 130 88 86 120 54 Z' fill='%239dc08b'/%3E%3Cpath d='M120 70 L120 166' stroke='%230e1210' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>
   :root {
@@ -18,12 +18,17 @@
     --sage-dim: #6f8f60;
     --sage-glow: rgba(157, 192, 139, 0.12);
     --amber: #e0b458;
+    --amber-glow: rgba(224, 180, 88, 0.1);
     --red: #d97b6c;
     --mono: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
     --sans: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
   }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
   body {
     margin: 0;
     background: var(--bg);
@@ -42,6 +47,13 @@
     padding: 0.1em 0.4em;
   }
   .wrap { max-width: 64rem; margin: 0 auto; padding: 0 1.5rem; }
+  .skip-link {
+    position: fixed; left: 1rem; top: 0.75rem; z-index: 100;
+    padding: 0.55rem 0.9rem; border-radius: 6px;
+    background: var(--sage); color: var(--bg); font-weight: 700;
+    transform: translateY(-160%); transition: transform 0.18s ease;
+  }
+  .skip-link:focus { transform: translateY(0); }
 
   /* ── nav ── */
   .topnav {
@@ -80,6 +92,11 @@
     color: var(--muted); text-decoration: none; font-size: 0.88rem;
   }
   .topnav a:not(.brand):hover { color: var(--sage); }
+  .topnav .nav-download {
+    color: var(--bg); background: var(--sage); border-radius: 5px;
+    padding: 0.25rem 0.65rem; font-weight: 700;
+  }
+  .topnav .nav-download:hover { color: var(--bg); background: #b3d3a2; }
 
   /* ── hero ── */
   .hero {
@@ -117,6 +134,13 @@
     text-wrap: balance;
   }
   .hero h1 .sage { color: var(--sage); }
+  .hero-sequence {
+    display: flex; align-items: center; justify-content: center; gap: 0.65rem;
+    margin: 0 0 1rem; font-family: var(--mono); font-size: 0.72rem;
+    color: var(--amber); letter-spacing: 0.2em; text-transform: uppercase;
+  }
+  .hero-sequence span { display: flex; align-items: center; gap: 0.65rem; }
+  .hero-sequence span:not(:last-child)::after { content: "→"; color: var(--sage-dim); }
   .hero .tagline {
     font-size: clamp(1.05rem, 2.2vw, 1.3rem);
     color: var(--muted);
@@ -176,32 +200,47 @@
   .lede { color: var(--muted); max-width: 44rem; margin: 0 0 2.25rem; font-size: 1.02rem; }
   .lede strong { color: var(--text); }
 
-  /* gap cards */
+  /* problem readout */
   .gap-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 1rem; }
   .gap {
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 1.25rem 1.4rem;
+    background: linear-gradient(145deg, var(--bg-card), var(--bg-raise));
+    border: 1px solid var(--border); border-top: 3px solid var(--sage-dim);
+    border-radius: 10px; padding: 1.35rem 1.4rem;
   }
+  .gap:nth-child(2) { border-top-color: var(--amber); }
+  .gap:nth-child(3) { border-top-color: var(--red); }
+  .gap .signal { font-family: var(--mono); font-size: 0.68rem; color: var(--muted); letter-spacing: 0.17em; text-transform: uppercase; }
   .gap h3 { margin: 0 0 0.4rem; font-size: 1.02rem; color: var(--sage); }
+  .gap:nth-child(2) h3 { color: var(--amber); }
+  .gap:nth-child(3) h3 { color: var(--red); }
   .gap p { margin: 0; font-size: 0.92rem; color: var(--muted); }
   .gap p strong { color: var(--text); }
 
   /* feature tour */
+  .pillar {
+    margin-top: 1.2rem; padding: 1.4rem; border: 1px solid var(--border);
+    border-radius: 12px; background: var(--bg-raise); position: relative; overflow: hidden;
+  }
+  .pillar::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--sage-dim); }
+  .pillar-diagnose { background: linear-gradient(110deg, var(--amber-glow), var(--bg-raise) 42%); }
+  .pillar-diagnose::before { background: var(--amber); }
+  .pillar-fix { background: linear-gradient(110deg, var(--sage-glow), var(--bg-raise) 46%); }
+  .pillar-fix::before { background: var(--sage); }
   .tour { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 0.9rem; }
   .tour-label {
     display: flex; align-items: center; gap: 1rem;
     font-family: var(--mono); font-size: 0.78rem; font-weight: 700;
     letter-spacing: 0.22em; text-transform: uppercase; color: var(--sage);
-    margin: 2.6rem 0 1rem;
+    margin: 0 0 1rem;
   }
-  .tour-label:first-of-type { margin-top: 0; }
+  .tour-label b { color: var(--text); font-size: 1.1rem; letter-spacing: 0.08em; }
   .tour-label em {
     font-style: normal; font-weight: 400; color: var(--muted);
     letter-spacing: 0.04em; text-transform: none;
   }
   .tour-label::after { content: ""; flex: 1; height: 1px; background: var(--border); }
   .feat {
-    background: var(--bg-raise); border: 1px solid var(--border);
+    background: rgba(14, 18, 16, 0.52); border: 1px solid var(--border);
     border-radius: 10px; padding: 1.1rem 1.25rem;
   }
   .feat .tab-name {
@@ -210,6 +249,11 @@
   }
   .feat p { margin: 0; font-size: 0.9rem; color: var(--muted); }
   .feat p strong { color: var(--text); }
+  .intent-cta {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    margin-top: 1rem; padding-top: 1rem; border-top: 1px dashed var(--sage-dim);
+  }
+  .intent-cta p { margin: 0; color: var(--text); font-weight: 600; }
 
   /* safety */
   .layers { counter-reset: layer; display: grid; gap: 1rem; max-width: 46rem; }
@@ -278,6 +322,30 @@
   .terminal .c { color: #5d6f61; }
   .terminal .p { color: var(--sage); user-select: none; }
 
+  /* download + developer path */
+  .download-panel {
+    display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 1.25rem;
+    padding: 1.5rem; border: 1px solid var(--sage-dim); border-radius: 12px;
+    background: linear-gradient(110deg, var(--sage-glow), var(--bg-card));
+  }
+  .download-mark {
+    width: 3rem; height: 3rem; border-radius: 50%; display: grid; place-items: center;
+    background: var(--sage); color: var(--bg); font: 700 1.4rem var(--mono);
+  }
+  .download-panel h3 { margin: 0 0 0.2rem; font-size: 1.1rem; }
+  .download-panel p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+  .dev-details {
+    margin-top: 1.5rem; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--bg-raise); overflow: hidden;
+  }
+  .dev-details summary {
+    padding: 0.9rem 1.1rem; cursor: pointer; color: var(--muted);
+    font-family: var(--mono); font-size: 0.78rem; letter-spacing: 0.08em;
+  }
+  .dev-details summary:hover { color: var(--sage); }
+  .dev-details .details-body { padding: 0 1.1rem 1.1rem; color: var(--muted); font-size: 0.9rem; }
+  .dev-details .terminal { margin-bottom: 0; }
+
   /* compat table */
   .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
   table { border-collapse: collapse; width: 100%; font-size: 0.88rem; min-width: 42rem; }
@@ -294,7 +362,7 @@
   .ai-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1rem; }
   .ai-col {
     background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 1.25rem 1.4rem;
+    border-radius: 10px; padding: 1.35rem 1.4rem; border-bottom: 3px solid var(--sage-dim);
   }
   .ai-col h3 { margin: 0 0 0.5rem; font-size: 1rem; color: var(--sage); }
   .ai-col p { margin: 0; font-size: 0.92rem; color: var(--muted); }
@@ -363,13 +431,28 @@
 
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
+    .hero-logo animate, .hero-logo animateTransform { display: none; }
     .reveal { opacity: 1; transform: none; }
+  }
+  @media (max-width: 760px) {
+    .topnav .wrap {
+      height: auto; min-height: 3.4rem; overflow: visible; white-space: normal;
+      flex-wrap: wrap; gap: 0.35rem 0.8rem; padding-top: 0.55rem; padding-bottom: 0.6rem;
+    }
+    .topnav .brand { width: 100%; margin-right: 0; }
+    .topnav a:not(.brand) { font-size: 0.78rem; }
+    .hero { padding-top: 4rem; }
+    .download-panel { grid-template-columns: auto 1fr; }
+    .download-panel .btn { grid-column: 1 / -1; text-align: center; }
+    .intent-cta { align-items: stretch; flex-direction: column; }
+    .intent-cta .btn { text-align: center; }
   }
   footer a { color: var(--sage); }
   .footer-brand { font-family: var(--mono); color: var(--sage-dim); margin-bottom: 0.4rem; }
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 
 <nav class="topnav">
   <div class="progress" id="progress"></div>
@@ -378,16 +461,16 @@
       <svg viewBox="0 0 240 240" aria-hidden="true"><circle cx="120" cy="120" r="86" fill="none" stroke="#9dc08b" stroke-width="12"/><line x1="50" y1="120" x2="84" y2="120" stroke="#e0b458" stroke-width="12" stroke-linecap="round"/><line x1="156" y1="120" x2="190" y2="120" stroke="#e0b458" stroke-width="12" stroke-linecap="round"/><path d="M120 52 C154 86 156 130 120 182 C84 130 86 86 120 52 Z" fill="#9dc08b"/><path d="M120 70 L120 166" stroke="#0e1210" stroke-width="6" stroke-linecap="round"/></svg>
       SAGEFLIGHT
     </a>
-    <a href="#gaps">Why</a>
-    <a href="#features">Features</a>
-    <a href="#workflow">Workflow</a>
+    <a href="#features">Product tour</a>
     <a href="#safety">Safety</a>
-    <a href="#ai">AI Stack</a>
+    <a href="#ai">Offline AI</a>
     <a href="#compat">Compatibility</a>
     <a href="#start">Quick Start</a>
+    <a class="nav-download" href="https://github.com/nbschultz97/sageflight/releases/latest">Download</a>
   </div>
 </nav>
 
+<main id="main-content">
 <header class="hero" id="top">
   <div class="wrap">
     <svg class="hero-logo" viewBox="0 0 240 240" role="img" aria-label="Sageflight logo">
@@ -416,12 +499,14 @@
       <path d="M120 128 C128 131 133 137 136 144" stroke="#0e1210" stroke-width="2" fill="none" stroke-linecap="round"/>
       <path d="M120 128 C112 131 107 137 104 144" stroke="#0e1210" stroke-width="2" fill="none" stroke-linecap="round"/>
     </svg>
-    <h1>Betaflight-style configurator.<br><span class="sage">On steroids.</span></h1>
+    <div class="hero-sequence" aria-label="Configure, diagnose, fix">
+      <span>Configure</span><span>Diagnose</span><span>Fix</span>
+    </div>
+    <h1>Find the fault.<br><span class="sage">Apply the exact fix.</span></h1>
     <p class="tagline">
-      The <strong>AI-native FPV configurator &amp; troubleshooter</strong>. Everything
-      your configurator does, plus an <strong>offline LLM copilot</strong> that inspects
-      the actual aircraft, explains what's wrong, and proposes fixes you approve with
-      one click.
+      Sageflight reads the aircraft on your bench, <strong>diagnoses what is wrong</strong>,
+      explains it in plain language, and prepares the precise change. You approve every
+      action; one-shot safety tokens enforce it; <strong>zero cloud calls</strong> leave the room.
     </p>
     <div class="badges">
       <span class="badge">100% offline · no cloud, no data exfil</span>
@@ -429,14 +514,15 @@
       <span class="badge">MIT licensed</span>
     </div>
     <div class="readout">
-      <span>TABS<b>15</b></span>
+      <span>DESTINATIONS<b>19</b></span>
       <span>TESTS<b>117 ✓</b></span>
       <span>CLOUD CALLS<b>0</b></span>
       <span>SAFETY TOKEN<b>60 s</b></span>
     </div>
     <div class="cta-row">
-      <a class="btn btn-primary" href="https://github.com/nbschultz97/sageflight">View on GitHub</a>
-      <a class="btn btn-ghost" href="#start">Quick Start ↓</a>
+      <a class="btn btn-primary" href="https://github.com/nbschultz97/sageflight/releases/latest">Download for Windows</a>
+      <a class="btn btn-ghost" href="#start">Installation guide ↓</a>
+      <a class="btn btn-ghost" href="https://github.com/nbschultz97/sageflight">GitHub repository</a>
     </div>
 
     <div class="mockup">
@@ -547,48 +633,32 @@
 <section id="gaps">
   <div class="wrap">
     <div class="kicker">Why Sageflight</div>
-    <h2>Built for the gaps the toolchain leaves open</h2>
+    <h2>Your aircraft is giving you signals. Sageflight translates.</h2>
     <p class="lede">
-      Betaflight Configurator shows you settings. BLHeliSuite shows you ESCs. PIDtoolbox
-      showed you graphs — before it was abandoned. None of them tell you <strong>what's
-      wrong or what to change</strong>. Sageflight targets exactly those pain points.
+      A flag, a noise peak, or a stale config should end in a decision—not an evening of
+      searching. Sageflight turns raw bench evidence into <strong>a clear cause and a safe next move</strong>.
     </p>
     <div class="gap-grid">
       <div class="gap">
+        <span class="signal">Live signal · arming flags</span>
         <h3>"Why won't it arm?"</h3>
         <p>The #1 beginner wall. The <strong>arming doctor</strong> decodes every
         arming-disable flag live and tells you the <strong>fix</strong> — not just the
         flag name. The AI can read them too.</p>
       </div>
       <div class="gap">
-        <h3>Tune analysis without MATLAB</h3>
+        <span class="signal">Flight evidence · blackbox</span>
+        <h3>Turn noise into a tuning decision</h3>
         <p>The Blackbox tab reads the full tuning state from your log, decodes flight
         frames, charts gyro noise spectra and motor stats — and the AI reviews it with
         <strong>concrete <code>set</code> suggestions</strong> citing measured numbers.</p>
       </div>
       <div class="gap">
-        <h3>Config migration that doesn't burn motors</h3>
+        <span class="signal">Version change · guarded write</span>
+        <h3>Migrate without gambling on old settings</h3>
         <p>Pasting an old diff into new firmware silently drops renamed parameters —
         the classic burned-motor trap. The AI <strong>translates your diff</strong> for
         the target version; you review every line before it runs.</p>
-      </div>
-      <div class="gap">
-        <h3>ESC visibility, no side-quest</h3>
-        <p>BLHeli 4-way interrogation built in: chip, MCU, firmware family and version
-        for all four ESCs. <strong>No BLHeliSuite detour</strong> just to see what your
-        ESCs are running.</p>
-      </div>
-      <div class="gap">
-        <h3>A knowledgeable bench partner</h3>
-        <p>Every setting, failure mode, and next step explainable in plain English —
-        <strong>fully offline</strong>, grounded in the official Betaflight docs via a
-        local RAG index.</p>
-      </div>
-      <div class="gap">
-        <h3>Know exactly what changed</h3>
-        <p>Every write batch <strong>auto-snapshots your config first</strong>, and any
-        two backups diff against each other. "What changed since last session?" is one
-        click, never a mystery.</p>
       </div>
     </div>
   </div>
@@ -596,14 +666,15 @@
 
 <section id="features">
   <div class="wrap">
-    <div class="kicker">Feature Tour</div>
-    <h2>Everything on one bench</h2>
+    <div class="kicker">Configure · Diagnose · Fix</div>
+    <h2>One instrument. One closed loop.</h2>
     <p class="lede">
       Hit <strong>Connect</strong> and it behaves like the configurator you know —
       artificial horizon, battery, RSSI, RC channels — then keeps going where the
       others stop.
     </p>
-    <div class="tour-label">Configure<em>full parity with your configurator</em></div>
+    <div class="pillar pillar-configure">
+    <div class="tour-label"><b>01 · Configure</b><em>the controls you expect, organized for the bench</em></div>
     <div class="tour">
       <div class="feat"><span class="tab-name">Tune · Presets</span>
         <p>PID / rates / filters / simplified tuning read straight off the FC, with AI
@@ -620,8 +691,9 @@
         <p>One-click backups, gated CLI console, restore, and a <strong>config
         timeline</strong>: every write batch auto-snapshots first, and any two backups
         diff against each other.</p></div>
-    </div>
-    <div class="tour-label">Diagnose<em>see what's actually wrong</em></div>
+    </div></div>
+    <div class="pillar pillar-diagnose">
+    <div class="tour-label"><b>02 · Diagnose</b><em>read the aircraft, not a generic checklist</em></div>
     <div class="tour">
       <div class="feat"><span class="tab-name">Setup</span>
         <p>Live link with artificial horizon, battery, RSSI, cycle time — plus the
@@ -635,8 +707,9 @@
         <p>Upload a .bbl/.bfl: header tuning state <em>and</em> decoded flight frames —
         noise spectra with peak detection, per-band RMS, motor saturation stats, fed to
         the AI tune review.</p></div>
-    </div>
-    <div class="tour-label">Fix<em>with a copilot, not a forum thread</em></div>
+    </div></div>
+    <div class="pillar pillar-fix">
+    <div class="tour-label"><b>03 · Fix</b><em>with a copilot, not a forum thread</em></div>
     <div class="tour">
       <div class="feat"><span class="tab-name">AI Assistant</span>
         <p>Offline LLM via Ollama with a tool belt: scan the FC, read telemetry and
@@ -651,49 +724,38 @@
         5" freestyle, cinewhoop, 7" long-range, whoop. <strong>Never skip the step
         that bites you at the field.</strong></p></div>
     </div>
+    <div class="intent-cta">
+      <p>Bring the next stubborn build to a bench that can explain itself.</p>
+      <a class="btn btn-primary" href="https://github.com/nbschultz97/sageflight/releases/latest">Download for Windows</a>
+    </div></div>
   </div>
 </section>
 
 <section id="workflow">
   <div class="wrap">
-    <div class="kicker">Workflow</div>
-    <h2>How a bench session goes</h2>
+    <div class="kicker">A Bench Session</div>
+    <h2>Evidence in. Approved change out.</h2>
     <p class="lede">
-      From "it won't arm" to airborne — without opening a forum thread, a second tool,
-      or a MATLAB license.
+      Sageflight keeps the diagnosis and the action in one traceable loop.
     </p>
     <div class="bench">
       <div class="bstep">
-        <h3>Plug in and Connect</h3>
+        <h3>Connect and establish a baseline</h3>
         <p>Sageflight detects the board and opens a persistent link. The bench comes
         alive instantly: <strong>artificial horizon, battery, RC channels, cycle
         time</strong> — plus a one-click scan of identity, firmware, and sensor health.</p>
       </div>
       <div class="bstep">
-        <h3>Let the arming doctor read the room</h3>
-        <p>Every arming-disable flag decoded live with a <strong>plain-English fix</strong> —
-        not a cryptic flag name you have to go look up. Watch flags clear in real time
-        as you fix them.</p>
+        <h3>Diagnose from live evidence</h3>
+        <p>Arming flags, telemetry, scans, config, and blackbox data become a
+        <strong>plain-English explanation</strong> grounded in the aircraft in front of you.</p>
       </div>
       <div class="bstep">
-        <h3>Ask the copilot anything</h3>
-        <p>The offline LLM inspects the <strong>actual aircraft</strong> — real scans,
-        live telemetry, your config, the official docs — and explains what it sees and
-        what to do about it. No cloud, no account, no forum necromancy.</p>
-      </div>
-      <div class="bstep">
-        <h3>Approve the fix</h3>
+        <h3>Review, approve, and verify</h3>
         <p>When the AI wants to change something, it drafts the exact CLI commands.
         They're validated server-side and rendered as a card — <strong>nothing runs
         until you click Apply</strong>, which requires a fresh backup and a 60-second
         safety token.</p>
-      </div>
-      <div class="bstep">
-        <h3>Fly, then close the loop</h3>
-        <p>Upload the blackbox log afterwards. Sageflight decodes the flight frames,
-        charts gyro noise spectra and motor stats, and the AI reviews your tune —
-        <strong>citing measured numbers</strong>, ending in concrete <code>set</code>
-        suggestions for the next pack.</p>
       </div>
     </div>
   </div>
@@ -765,8 +827,8 @@
 
 <section id="ai">
   <div class="wrap">
-    <div class="kicker">AI Stack</div>
-    <h2>Local models, grounded answers</h2>
+    <div class="kicker">Offline Copilot</div>
+    <h2>It knows this aircraft, not just FPV lore</h2>
     <p class="lede">
       Powered by <a href="https://ollama.com">Ollama</a> on your own machine.
       Sageflight auto-selects the strongest tool-capable model you have pulled —
@@ -774,24 +836,16 @@
     </p>
     <div class="ai-cols">
       <div class="ai-col">
-        <h3>Agent mode</h3>
-        <p>The assistant calls real tools — <code>scan_fc</code>,
-        <code>get_live_telemetry</code>, <code>get_config_diff</code>,
-        <code>get_motor_history</code>, <code>search_docs</code> and more — so its
-        facts come from <strong>real scans, not vibes</strong>.</p>
+        <h3>Answers from the aircraft</h3>
+        <p>The assistant reads live telemetry, scans, config diffs, arming flags, and
+        motor-test history. Its diagnosis begins with <strong>your actual bench state</strong>,
+        not a generic answer.</p>
       </div>
       <div class="ai-col">
-        <h3>Docs-grounded RAG</h3>
+        <h3>Grounded in official documentation</h3>
         <p>One click builds a local index of the official Betaflight documentation
-        (~200 files, embedded locally). The <code>search_docs</code> tool retrieves real
-        documentation before answering — <strong>internet needed once, offline
-        forever after</strong>.</p>
-      </div>
-      <div class="ai-col">
-        <h3>MCP server</h3>
-        <p>Sageflight doubles as an MCP server: any MCP-aware agent (Claude Code, etc.)
-        can inspect the bench — scans, telemetry, decoded arming flags, config diffs,
-        test history. <strong>Read-only by design.</strong></p>
+        locally. It retrieves the relevant source before answering, so explanations stay
+        <strong>specific, inspectable, and offline</strong>.</p>
       </div>
     </div>
     <div class="mockup">
@@ -799,12 +853,19 @@
       <div class="mockup-caption">AI ASSISTANT — the real tab: Ollama up, 2101 doc chunks indexed locally, tools on, zero cloud</div>
     </div>
 
-    <div class="terminal">
-      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>&nbsp;recommended models</div>
-      <pre><span class="p">$</span> ollama pull qwen2.5:14b        <span class="c"># recommended chat model (32GB-RAM machines) — auto-selected</span>
+    <details class="dev-details">
+      <summary>For power users &amp; developers · model setup and read-only integrations</summary>
+      <div class="details-body">
+        <p>Sageflight can expose scans, telemetry, decoded flags, config diffs, and test
+        history through its read-only MCP server. To manage local models manually:</p>
+        <div class="terminal">
+          <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>&nbsp;optional model setup</div>
+          <pre><span class="p">$</span> ollama pull qwen2.5:14b        <span class="c"># recommended chat model (32GB-RAM machines) — auto-selected</span>
 <span class="p">$</span> ollama pull llama3.2:3b        <span class="c"># lightweight fallback for weaker hardware</span>
 <span class="p">$</span> ollama pull nomic-embed-text   <span class="c"># embeddings for the local docs index</span></pre>
-    </div>
+        </div>
+      </div>
+    </details>
   </div>
 </section>
 
@@ -819,15 +880,20 @@
     </p>
     <div class="table-wrap">
       <table>
-        <tr><th></th><th>Betaflight</th><th>INAV</th><th>EmuFlight</th><th>ArduPilot / PX4</th><th>KISS</th></tr>
-        <tr><td>Detect / identify</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="part">USB detect</td><td class="no">—</td></tr>
-        <tr><td>Live telemetry (MSP)</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">roadmap</td><td class="no">—</td></tr>
-        <tr><td>Arming doctor (decoded fixes)</td><td class="yes">✓</td><td class="part">raw flags</td><td class="part">raw flags</td><td class="no">—</td><td class="no">—</td></tr>
-        <tr><td>CLI console / backup / restore</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">—</td><td class="no">—</td></tr>
-        <tr><td>Motor tests</td><td class="yes">✓</td><td class="part">✓*</td><td class="part">✓*</td><td class="no">—</td><td class="no">—</td></tr>
-        <tr><td>ESC 4-way interrogation</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">—</td><td class="no">—</td></tr>
-        <tr><td>Firmware flashing (DFU)</td><td class="yes">✓ + releases</td><td class="yes">✓ + releases</td><td class="part">local .hex</td><td class="no">—</td><td class="no">—</td></tr>
-        <tr><td>AI assistant / proposals</td><td class="yes">✓</td><td class="part">✓ (review CLI)</td><td class="yes">✓</td><td class="part">advice only</td><td class="part">advice only</td></tr>
+        <caption class="sr-only">Sageflight capability support by flight-controller firmware</caption>
+        <thead>
+          <tr><th scope="col">Capability</th><th scope="col">Betaflight</th><th scope="col">INAV</th><th scope="col">EmuFlight</th><th scope="col">ArduPilot / PX4</th><th scope="col">KISS</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Detect / identify</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="part">USB detect</td><td class="no">—</td></tr>
+          <tr><th scope="row">Live telemetry (MSP)</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">roadmap</td><td class="no">—</td></tr>
+          <tr><th scope="row">Arming doctor (decoded fixes)</th><td class="yes">✓</td><td class="part">raw flags</td><td class="part">raw flags</td><td class="no">—</td><td class="no">—</td></tr>
+          <tr><th scope="row">CLI console / backup / restore</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">—</td><td class="no">—</td></tr>
+          <tr><th scope="row">Motor tests</th><td class="yes">✓</td><td class="part">✓*</td><td class="part">✓*</td><td class="no">—</td><td class="no">—</td></tr>
+          <tr><th scope="row">ESC 4-way interrogation</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">—</td><td class="no">—</td></tr>
+          <tr><th scope="row">Firmware flashing (DFU)</th><td class="yes">✓ + releases</td><td class="yes">✓ + releases</td><td class="part">local .hex</td><td class="no">—</td><td class="no">—</td></tr>
+          <tr><th scope="row">AI assistant / proposals</th><td class="yes">✓</td><td class="part">✓ (review CLI)</td><td class="yes">✓</td><td class="part">advice only</td><td class="part">advice only</td></tr>
+        </tbody>
       </table>
     </div>
     <p class="compat-note">
@@ -840,47 +906,46 @@
 <section id="start">
   <div class="wrap">
     <div class="kicker">Quick Start</div>
-    <h2>On your bench in two minutes</h2>
-    <div class="terminal">
-      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>&nbsp;web app</div>
-      <pre><span class="p">$</span> git clone https://github.com/nbschultz97/sageflight
+    <h2>Download the installer. Run it. Connect.</h2>
+    <p class="lede">The fastest path to Sageflight is the packaged Windows release—no terminal or development environment required.</p>
+    <div class="download-panel">
+      <div class="download-mark" aria-hidden="true">↓</div>
+      <div>
+        <h3>Sageflight for Windows</h3>
+        <p>Get the latest installer from Releases, install it, then plug in your flight controller.</p>
+      </div>
+      <a class="btn btn-primary" href="https://github.com/nbschultz97/sageflight/releases/latest">Download latest release</a>
+    </div>
+    <details class="dev-details">
+      <summary>Build from source · for developers</summary>
+      <div class="details-body">
+        <div class="terminal">
+          <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>&nbsp;development build</div>
+          <pre><span class="p">$</span> git clone https://github.com/nbschultz97/sageflight
 <span class="p">$</span> cd sageflight <span class="c">&amp;&amp;</span> npm install
 <span class="p">$</span> cd app <span class="c">&amp;&amp;</span> npm install
-<span class="p">$</span> npm run dev
-<span class="c"># open http://localhost:5173</span></pre>
-    </div>
-    <div class="terminal">
-      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span>&nbsp;desktop app (Electron)</div>
-      <pre><span class="p">$</span> cd app <span class="c">&amp;&amp;</span> npm run build
-<span class="p">$</span> cd ../desktop <span class="c">&amp;&amp;</span> npm install
-<span class="p">$</span> npm start</pre>
-    </div>
-    <p class="lede" style="margin-top:1.5rem; margin-bottom:0;">
-      Firmware flashing needs <a href="https://dfu-util.sourceforge.net/">dfu-util</a> on
-      PATH (<code>winget install dfu-util</code> / <code>brew install dfu-util</code> /
-      <code>apt install dfu-util</code>). The AI assistant needs
-      <a href="https://ollama.com/download">Ollama</a> — everything else works without it.
-    </p>
+<span class="p">$</span> npm run dev</pre>
+        </div>
+        <p>Firmware flashing requires <a href="https://dfu-util.sourceforge.net/">dfu-util</a> on PATH. The optional AI assistant uses <a href="https://ollama.com/download">Ollama</a>; the rest of Sageflight works without it.</p>
+      </div>
+    </details>
   </div>
 </section>
 
 <section id="roadmap">
   <div class="wrap">
     <div class="kicker">Roadmap</div>
-    <h2>Shipped &amp; shipping</h2>
+    <h2>Built today. Calibrated next.</h2>
     <div class="road">
       <div class="done">
         <h3>Shipped</h3>
         <ul>
           <li>Live telemetry + arming doctor</li>
           <li>AI proposals with human approve</li>
-          <li>Firmware-safe flash + AI config migration</li>
-          <li>ESC 4-way interrogation</li>
-          <li>Blackbox frame decoding + noise spectra</li>
-          <li>Tune / Modes / Ports / Presets / OSD / Sensors editors</li>
+          <li>Firmware-safe flash + config migration</li>
+          <li>ESC interrogation + blackbox diagnostics</li>
+          <li>Full bench configuration editors</li>
           <li>Config timeline with auto-snapshots</li>
-          <li>Local RAG over official BF docs</li>
-          <li>Read-only MCP server</li>
         </ul>
       </div>
       <div class="next">
@@ -889,7 +954,6 @@
           <li>Blackbox v2b — step response, throttle-freq heatmap, real-log validation</li>
           <li>VTX tables editor</li>
           <li>ESC settings write + flashing (Bluejay / AM32)</li>
-          <li>Packaged installers</li>
           <li>INAV-calibrated arming flags</li>
           <li>ArduPilot / PX4 via MAVLink</li>
         </ul>
@@ -897,6 +961,7 @@
     </div>
   </div>
 </section>
+</main>
 
 <footer>
   <svg class="footer-logo" viewBox="0 0 240 240" aria-hidden="true"><circle cx="120" cy="120" r="86" fill="none" stroke="#6f8f60" stroke-width="10"/><line x1="52" y1="120" x2="84" y2="120" stroke="#e0b458" stroke-width="10" stroke-linecap="round"/><line x1="156" y1="120" x2="188" y2="120" stroke="#e0b458" stroke-width="10" stroke-linecap="round"/><path d="M120 54 C152 86 154 130 120 180 C86 130 88 86 120 54 Z" fill="#6f8f60"/><path d="M120 70 L120 166" stroke="#0e1210" stroke-width="5" stroke-linecap="round"/></svg>
