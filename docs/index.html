@@ -97,6 +97,9 @@
     padding: 0.25rem 0.65rem; font-weight: 700;
   }
   .topnav .nav-download:hover { color: var(--bg); background: #b3d3a2; }
+  /* Desktop: links flow inline exactly as before; hamburger hidden. */
+  .topnav .nav-menu { display: contents; }
+  .topnav .nav-toggle { display: none; }
 
   /* ── hero ── */
   .hero {
@@ -435,12 +438,30 @@
     .reveal { opacity: 1; transform: none; }
   }
   @media (max-width: 760px) {
+    /* Collapse the links behind a hamburger so the bar stays: brand + toggle. */
     .topnav .wrap {
-      height: auto; min-height: 3.4rem; overflow: visible; white-space: normal;
-      flex-wrap: wrap; gap: 0.35rem 0.8rem; padding-top: 0.55rem; padding-bottom: 0.6rem;
+      height: 3.4rem; overflow: visible; white-space: nowrap; flex-wrap: nowrap;
     }
-    .topnav .brand { width: 100%; margin-right: 0; }
-    .topnav a:not(.brand) { font-size: 0.78rem; }
+    .topnav .nav-toggle {
+      display: inline-flex; flex-direction: column; justify-content: center; gap: 4px;
+      margin-left: auto; width: 2.2rem; height: 2.2rem; padding: 0.45rem;
+      background: none; border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+    }
+    .topnav .nav-toggle span {
+      display: block; height: 2px; width: 100%; background: var(--sage); border-radius: 2px;
+    }
+    .topnav .nav-menu {
+      display: none; position: absolute; top: 100%; left: 0; right: 0;
+      flex-direction: column; align-items: stretch; gap: 0;
+      background: rgba(14, 18, 16, 0.98); backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+      padding: 0.4rem 0; box-shadow: 0 16px 40px rgba(0,0,0,0.45);
+    }
+    .topnav .nav-menu.open { display: flex; }
+    .topnav .nav-menu a:not(.brand) { padding: 0.75rem 1.25rem; font-size: 0.95rem; }
+    .topnav .nav-menu .nav-download {
+      margin: 0.5rem 1.25rem 0.3rem; text-align: center; padding: 0.5rem 0.65rem;
+    }
     .hero { padding-top: 4rem; }
     .download-panel { grid-template-columns: auto 1fr; }
     .download-panel .btn { grid-column: 1 / -1; text-align: center; }
@@ -461,12 +482,17 @@
       <svg viewBox="0 0 240 240" aria-hidden="true"><circle cx="120" cy="120" r="86" fill="none" stroke="#9dc08b" stroke-width="12"/><line x1="50" y1="120" x2="84" y2="120" stroke="#e0b458" stroke-width="12" stroke-linecap="round"/><line x1="156" y1="120" x2="190" y2="120" stroke="#e0b458" stroke-width="12" stroke-linecap="round"/><path d="M120 52 C154 86 156 130 120 182 C84 130 86 86 120 52 Z" fill="#9dc08b"/><path d="M120 70 L120 166" stroke="#0e1210" stroke-width="6" stroke-linecap="round"/></svg>
       SAGEFLIGHT
     </a>
-    <a href="#features">Product tour</a>
-    <a href="#safety">Safety</a>
-    <a href="#ai">Offline AI</a>
-    <a href="#compat">Compatibility</a>
-    <a href="#start">Quick Start</a>
-    <a class="nav-download" href="https://github.com/nbschultz97/sageflight/releases/latest">Download</a>
+    <button class="nav-toggle" id="navToggle" type="button" aria-controls="nav-menu" aria-expanded="false" aria-label="Open menu">
+      <span></span><span></span><span></span>
+    </button>
+    <div class="nav-menu" id="nav-menu">
+      <a href="#features">Product tour</a>
+      <a href="#safety">Safety</a>
+      <a href="#ai">Offline AI</a>
+      <a href="#compat">Compatibility</a>
+      <a href="#start">Quick Start</a>
+      <a class="nav-download" href="https://github.com/nbschultz97/sageflight/releases/latest">Download</a>
+    </div>
   </div>
 </nav>
 
@@ -980,6 +1006,25 @@
   }
   addEventListener('scroll', onScroll, { passive: true });
   onScroll();
+
+  /* Mobile nav: hamburger toggles the collapsed menu */
+  var navToggle = document.getElementById('navToggle');
+  var navMenu = document.getElementById('nav-menu');
+  if (navToggle && navMenu) {
+    var setNav = function (open) {
+      navMenu.classList.toggle('open', open);
+      navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    navToggle.addEventListener('click', function () {
+      setNav(!navMenu.classList.contains('open'));
+    });
+    navMenu.addEventListener('click', function (e) {
+      if (e.target.closest('a')) setNav(false);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && navMenu.classList.contains('open')) { setNav(false); navToggle.focus(); }
+    });
+  }
 
   var items = document.querySelectorAll(
     'section .kicker, section h2, section .lede, section .tour-label, section .gap, section .feat, ' +
