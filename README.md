@@ -68,7 +68,9 @@ macOS (`Sageflight-<version>.dmg`) and Linux (`.AppImage`) builds are on the
 same Releases page from v0.6.0 (unsigned — macOS needs right-click → Open
 the first time).
 
-## Quick start (from source)
+## Run from source (for development)
+
+> **Just want to use Sageflight?** Install a build from [Releases](https://github.com/nbschultz97/sageflight/releases/latest) (see Download above) — that is the real, branded app. The commands below are for **development only**: `npm run dev` opens a browser dev server, and `npm start` runs the Electron shell under the stock Electron binary (so it shows the generic **Electron** icon, not Sageflight). Neither is the packaged product, and the branded icon only exists on an installed build.
 
 ```bash
 git clone https://github.com/nbschultz97/sageflight
